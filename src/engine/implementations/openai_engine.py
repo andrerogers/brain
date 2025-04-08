@@ -1,5 +1,5 @@
 import json
-import anthropic
+import openai
 import numpy as np
 
 from typing import Dict, Any
@@ -8,28 +8,26 @@ from sklearn.metrics.pairwise import cosine_similarity
 from engine import BaseEngine
 
 
-class AnthropicEngine(BaseEngine):
+class OpenAIEngine(BaseEngine):
     def __init__(self, config: Dict[str, Any]):
         self.api_key = config.get('api_key')
         self.embedding_model = config.get('embedding_model',
-                                          'claude-3-7-embeddings-v1')
-        self.llm_model = config.get('llm_model', 'claude-3-7-sonnet-20250219')
+                                          'text-embedding-3-large')
+        self.llm_model = config.get('llm_model', 'gpt-4')
         self.max_tokens = config.get('max_tokens', 1000)
 
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.client = openai.OpenAI(api_key=self.api_key)
         self.documents = []
         self.embeddings = []
 
-    def _create_prompt(self, query: str, context: str) -> str:
-        """Create a prompt with the query and context."""
-        return f"""Use the following information to answer the user's question:
+    def _create_system_message(self, context: str) -> str:
+        """Create a system message with context."""
+        return f"""You are a helpful assistant. Use the following information \
+        to answer the user's question:
 
-Context:
 {context}
 
-User Question: {query}
-
-Answer:"""
+Answer based only on the information provided. If you don't know, say so."""
 
     def add_documents(self, documents):
         if not documents:
@@ -73,7 +71,7 @@ Answer:"""
     async def stream_response(self, question, top_k=3):
         relevant_docs = await self.get_relevant_docs(question, top_k)
         context = "\n\n".join(relevant_docs)
-        prompt = self._create_prompt(question, context)
+        sys_message = self._create_system_message(context)
 
         yield {
             "event": "metadata",
@@ -82,26 +80,36 @@ Answer:"""
             })
         }
 
-        with self.client.messages.stream(
+        response = self.client.chat.completions.create(
             model=self.llm_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=self.max_tokens
-        ) as stream:
-            for text in stream.text_stream:
-                yield {"event": "token", "data": text}
+            messages=[
+                {"role": "system", "content": sys_message},
+                {"role": "user", "content": question}
+                ],
+            max_tokens=self.max_tokens,
+            stream=True
+        )
+
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield {"event": "token", "data": chunk.choices[0].delta.content}
 
     def get_response(self, question, top_k=3):
         relevant_docs = self.get_relevant_docs(question, top_k)
         context = "\n\n".join(relevant_docs)
-        prompt = self._create_prompt(question, context)
+        sys_message = self._create_system_message(context)
 
-        response = self.client.messages.create(
+        response = self.client.chat.completions.create(
             model=self.llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": sys_message},
+                {"role": "user", "content": question}
+                ],
             max_tokens=self.max_tokens
         )
 
         return {
-            "answer": response.content[0].text,
+            "answer": response.choices[0].message.content,
             "sources": relevant_docs
         }
+
