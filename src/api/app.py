@@ -25,12 +25,10 @@ def create_app() -> FastAPI:
     app.include_router(query_router, prefix="/query", tags=["Queries"])
     app.include_router(info_router, prefix="/info", tags=["System Info"])
 
-    # Add startup event
     @app.on_event("startup")
     async def startup_event():
-        """Initialize components on startup."""
         from ..config import settings
-        print(f"Server starting with RAG type: {settings.rag_type}")
+        print("Server starting")
         print(f"Host: {settings.host}, Port: {settings.port}")
 
         from .dependencies import get_engine
