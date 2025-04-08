@@ -58,7 +58,7 @@ pyenv local 3.10.12   # explicitly set the version (optional, as .python-version
 poetry install
 
 # Activate the virtual environment
-poetry shell
+poetry env activate 
 
 # Load environment variables
 source .env
