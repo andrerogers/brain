@@ -163,9 +163,21 @@ eventSource.addEventListener('metadata', (event) => {
 
 1. Create a new implementation file in `src/engine/implementations/`
 2. Implement the `BaseEngine` abstract class
-3. Add the new implementation to the `RAGFactory` in `src/engine/factory.py`
+3. Add the new implementation to the `EngineFactory` in `src/engine/factory.py`
 4. Update the configuration to support the new provider
 
-## License
+### Example CuRl's
 
-MIT
+````bash
+curl "http://localhost:8000/info/health
+
+curl -X POST http://localhost:8000/query/response -H "Content-Type: application/json" -d '{
+    "query": "What is the capital of France?",
+    "top_k": 5
+  }' --no-buffer
+
+curl -X POST http://localhost:8000/query/stream -H "Content-Type: application/json" -H "Accept: text/event-stream" -d '{
+    "query": "What is the capital of Canada?",
+    "top_k": 5
+  }' --no-buffer
+````
