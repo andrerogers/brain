@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ...engine import BaseEngine
 from ..dependencies import get_engine
-from ..models.schemas import DocumentsInput, DocumentResponse
+from ..models.schemas import DocumentInput, DocumentResponse
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ router = APIRouter()
     summary="Add documents to the RAG system"
 )
 async def add_documents(
-    input_data: DocumentsInput,
+    input_data: DocumentInput,
     engine: BaseEngine = Depends(get_engine)
 ):
     if not input_data.documents:

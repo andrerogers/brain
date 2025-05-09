@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import documents_router, query_router, info_router
+from src.api.routes import documents_router, query_router, info_router
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Modular RAG Server",
+        title="Modular LLM Server",
         description="A modular Retrieval-Augmented Generation (RAG) \
         server that supports multiple LLM providers",
         version="0.1.0"
@@ -27,13 +27,14 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
-        from ..config import settings
+        from src.config import get_settings
+        settings = get_settings()
         print("Server starting")
         print(f"Host: {settings.host}, Port: {settings.port}")
 
         from .dependencies import get_engine
         try:
-            await get_engine()
+            await get_engine(settings)
             print("LLM Engine initialized successfully")
         except Exception as e:
             print(f"Failed to initialize LLM Engine: {str(e)}")

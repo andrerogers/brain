@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     port: int = Field(8000, env="PORT")
 
     # LLM settings
-    engine_type: str = Field("anthropic", env="LLM_TYPE")
+    engine_type: str = Field("anthropic", env="ENGINE_TYPE")
 
     # RAG settings
     rag_top_k: int = Field(3, env="RAG_TOP_K")
@@ -37,21 +38,22 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
     def get_engine_config(self) -> Dict[str, Any]:
-        """Get the configuration dictionary for the selected RAG type."""
-        if self.rag_type.lower() == 'anthropic':
+        """Get the configuration dictionary for the selected engine type."""
+        # Changed rag_type to engine_type to match the field name
+        if self.engine_type.lower() == 'anthropic':
             if not self.anthropic_api_key:
-                raise ValueError("ANTHROPIC_API_KEY is required \
-                when LLM_TYPE is 'anthropic'")
+                raise ValueError("ANTHROPIC_API_KEY is required "
+                                 "when ENGINE_TYPE is 'anthropic'")
             return {
                 'api_key': self.anthropic_api_key,
                 'embedding_model': self.anthropic_embedding_model,
                 'llm_model': self.anthropic_llm_model,
                 'max_tokens': self.max_tokens
             }
-        elif self.rag_type.lower() == 'openai':
+        elif self.engine_type.lower() == 'openai':
             if not self.openai_api_key:
-                raise ValueError("OPENAI_API_KEY is required \
-                when LLM_TYPE is 'openai'")
+                raise ValueError("OPENAI_API_KEY is required "
+                                 "when ENGINE_TYPE is 'openai'")
             return {
                 'api_key': self.openai_api_key,
                 'embedding_model': self.openai_embedding_model,
@@ -59,7 +61,8 @@ class Settings(BaseSettings):
                 'max_tokens': self.max_tokens
             }
         else:
-            raise ValueError(f"Unsupported LLM_TYPE: {self.rag_type}")
+            # Changed rag_type to engine_type to match the field name
+            raise ValueError(f"Unsupported ENGINE_TYPE: {self.engine_type}")
 
 
 def get_settings() -> Settings:

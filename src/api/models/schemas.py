@@ -1,4 +1,5 @@
-from typing import BaseModel, Optional, List
+from typing import Optional, List
+from pydantic import BaseModel
 
 
 class QueryInput(BaseModel):
@@ -12,7 +13,7 @@ class QueryResponse(BaseModel):
     query: str
 
 
-class DocumentsInput(BaseModel):
+class DocumentInput(BaseModel):
     documents: List[str]
 
 

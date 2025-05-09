@@ -2,8 +2,8 @@ import uvicorn
 import sys
 from pathlib import Path
 
-from config import get_settings
-from api.app import app
+from src.config import get_settings
+from src.api.app import app
 
 
 # Add the project root to the Python path

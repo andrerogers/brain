@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict, Any
 from sklearn.metrics.pairwise import cosine_similarity
 
-from engine import BaseEngine
+from src.engine import BaseEngine
 
 
 class OpenAIEngine(BaseEngine):

@@ -1,17 +1,18 @@
 from sse_starlette.sse import EventSourceResponse
 from typing import AsyncGenerator, Dict, Optional, Any
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from ...config import Settings
-from ...engine import BaseEngine
-from ..dependencies import get_engine, get_settings
-from ..models.schemas import QueryInput, QueryResponse
+from src.config import Settings
+from src.engine import BaseEngine
+from src.api.dependencies import get_engine, get_settings
+from src.api.models.schemas import QueryInput, QueryResponse
 
 router = APIRouter()
 
 
 @router.post(
-    "/",
+    "/response",
     response_model=QueryResponse,
     summary="Query the LLM"
 )
@@ -37,45 +38,42 @@ async def query(
 
 async def stream_llm_response(
     query: str,
-    rag: BaseEngine,
+    engine: BaseEngine,
     top_k: Optional[int] = None,
     settings: Settings = Depends(get_settings)
 ) -> AsyncGenerator[Dict[str, Any], None]:
     try:
         # Signal the start of streaming
         yield {"event": "start", "data": "Processing request..."}
-
         effective_top_k = top_k or settings.rag_top_k
-
-        async for event in rag.stream_response(query, effective_top_k):
+        async for event in engine.stream_response(query, effective_top_k):
             yield event
-
         # Signal completion
         yield {"event": "end", "data": "Response complete"}
-
     except Exception as e:
         # Handle errors
         yield {"event": "error", "data": str(e)}
 
 
-@router.get(
+class QueryRequest(BaseModel):
+    query: str = Field(..., description="The user's question")
+    top_k: Optional[int] = Field(None, description="Number of documents to retrieve")
+
+
+@router.post(
     "/stream",
-    summary="Stream a response from the RAG system"
+    summary="Stream a response from the LLM Engine"
 )
 async def stream_chat(
-    query: str = Query(..., description="The user's question"),
-    top_k: Optional[int] = Query(
-        None,
-        description="Number of documents to retrieve"
-    ),
-    rag: BaseEngine = Depends(get_engine),
+    request: QueryRequest,
+    engine: BaseEngine = Depends(get_engine),
     settings: Settings = Depends(get_settings)
 ):
     if settings.debug:
-        print(f"Streaming request: {query}")
+        print(f"Streaming request: {request.query}")
     return EventSourceResponse(stream_llm_response(
-        query,
-        rag,
-        top_k,
+        request.query,
+        engine,
+        request.top_k,
         settings
     ))
