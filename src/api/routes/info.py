@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, status
 from typing import Dict, Any
 
-from src.config import Settings
-from src.api.dependencies import get_settings
+from config import Settings
+from api.dependencies import get_settings
 
 router = APIRouter()
 

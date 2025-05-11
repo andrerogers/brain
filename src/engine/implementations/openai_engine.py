@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from openai import OpenAI
 
-from src.engine import BaseEngine
+from engine import BaseEngine
 
 
 class OpenAIEngine(BaseEngine):

@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from anthropic import Anthropic
 
-from src.engine import BaseEngine
+from engine import BaseEngine
 
 
 class AnthropicEngine(BaseEngine):

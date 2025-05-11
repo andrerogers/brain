@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import documents_router, query_router, info_router
+from api.routes import query_router, info_router
 
 
 def create_app() -> FastAPI:
@@ -20,14 +20,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(
-        documents_router, prefix="/documents", tags=["Documents"])
     app.include_router(query_router, prefix="/query", tags=["Queries"])
     app.include_router(info_router, prefix="/info", tags=["System Info"])
 
     @app.on_event("startup")
     async def startup_event():
-        from src.config import get_settings
+        from config import get_settings
         settings = get_settings()
         print("Server starting")
         print(f"Host: {settings.host}, Port: {settings.port}")
