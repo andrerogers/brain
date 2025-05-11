@@ -10,7 +10,7 @@ class EngineFactory:
             from engine.implementations import AnthropicEngine
             return AnthropicEngine(config)
         # elif engine_type.lower() == 'openai':
-        #     from rag_implementations.openai_rag import OpenAIRAG
+        #   from engine.implementations import OpenAIEngine
         #     return OpenAIRAG(config)
         else:
             raise ValueError(f"Unknown Engine type: {engine_type}")

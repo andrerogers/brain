@@ -1,6 +1,6 @@
 # Brain
 
-A modular AI service with interchangeable LLM backends for Retrieval-Augmented Generation (RAG).
+A modular AI service with interchangeable LLM backends to stream or provide a response.
 
 ## Project Structure
 
@@ -37,14 +37,13 @@ A modular AI service with interchangeable LLM backends for Retrieval-Augmented G
 
 - **Modular Architecture**: Support for multiple LLM providers through a common interface
 - **Streaming Responses**: Real-time streaming responses via Server-Sent Events (SSE)
-- **Document Management**: Add and retrieve documents for the RAG system
 - **Easy Configuration**: Configure via environment variables or `.env` file
 - **High-Performance**: Built on FastAPI for high-performance API responses
 
 ## Supported LLM Providers
 
-- **Anthropic Claude**: Integrated with Claude 3.7 Sonnet for both embeddings and responses
-- **OpenAI**: Support for OpenAI embeddings and GPT models [TODO]
+- **Anthropic Claude**: Integrated with Claude 3.7 Sonnet
+- **OpenAI**: Support for OpenAI embeddings and GPT models (not tested)
 
 ## Tech Stack
 
@@ -109,28 +108,9 @@ python src/server.py
 
 The server will be available at `http://localhost:8000` (or the host/port configured in your settings).
 
-## API Usage
+## Development
+### API Usage
 
-### Add Documents
-
-```bash
-curl -X POST "http://localhost:8000/documents" \
-  -H "Content-Type: application/json" \
-  -d '{"documents": ["Document 1 content", "Document 2 content"]}'
-```
-
-### Query (Non-Streaming)
-
-```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What information do you have about Python?"}'
-```
-
-### Streaming Response
-
-```
-GET http://localhost:8000/query/stream?query=What%20is%20RAG?
 ```
 
 Consume the stream with JavaScript:
@@ -150,34 +130,16 @@ eventSource.addEventListener('metadata', (event) => {
 });
 ```
 
-## Development
-
-### Project Organization
-
-- `src/api`: API layer with FastAPI routes and dependencies
-- `src/engine`: Core RAG implementations with abstract base classes
-- `src/config.py`: Configuration management
-- `src/server.py`: Main entry point
-
-### Adding a New LLM Provider
-
-1. Create a new implementation file in `src/engine/implementations/`
-2. Implement the `BaseEngine` abstract class
-3. Add the new implementation to the `EngineFactory` in `src/engine/factory.py`
-4. Update the configuration to support the new provider
-
 ### Example CuRl's
 
 ````bash
 curl "http://localhost:8000/info/health
 
 curl -X POST http://localhost:8000/query/response -H "Content-Type: application/json" -d '{
-    "query": "What is the capital of France?",
-    "top_k": 5
+    "query": "What is the capital of Canada?"
   }' --no-buffer
 
 curl -X POST http://localhost:8000/query/stream -H "Content-Type: application/json" -H "Accept: text/event-stream" -d '{
-    "query": "What is the capital of Canada?",
-    "top_k": 5
+    "query": "What is the capital of Canada?"
   }' --no-buffer
 ````

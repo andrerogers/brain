@@ -18,15 +18,12 @@ router = APIRouter()
 )
 async def query(
     input_data: QueryInput,
-    engine: BaseEngine = Depends(get_engine),
-    settings: Settings = Depends(get_settings)
+    engine: BaseEngine = Depends(get_engine)
 ):
     try:
-        top_k = input_data.top_k or settings.rag_top_k
-        result = await engine.get_response(input_data.query, top_k)
+        result = await engine.get_response(input_data.query)
         return {
             "answer": result["answer"],
-            "sources": result["sources"],
             "query": input_data.query
         }
     except Exception as e:
@@ -38,15 +35,12 @@ async def query(
 
 async def stream_llm_response(
     query: str,
-    engine: BaseEngine,
-    top_k: Optional[int] = None,
-    settings: Settings = Depends(get_settings)
+    engine: BaseEngine
 ) -> AsyncGenerator[Dict[str, Any], None]:
     try:
         # Signal the start of streaming
         yield {"event": "start", "data": "Processing request..."}
-        effective_top_k = top_k or settings.rag_top_k
-        async for event in engine.stream_response(query, effective_top_k):
+        async for event in engine.stream_response(query):
             yield event
         # Signal completion
         yield {"event": "end", "data": "Response complete"}
@@ -67,13 +61,9 @@ class QueryRequest(BaseModel):
 async def stream_chat(
     request: QueryRequest,
     engine: BaseEngine = Depends(get_engine),
-    settings: Settings = Depends(get_settings)
 ):
-    if settings.debug:
-        print(f"Streaming request: {request.query}")
+    print(f"Streaming request: {request.query}")
     return EventSourceResponse(stream_llm_response(
         request.query,
-        engine,
-        request.top_k,
-        settings
+        engine
     ))

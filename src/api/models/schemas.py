@@ -1,15 +1,13 @@
-from typing import Optional, List
+from typing import List
 from pydantic import BaseModel
 
 
 class QueryInput(BaseModel):
     query: str
-    top_k: Optional[int] = None
 
 
 class QueryResponse(BaseModel):
     answer: str
-    sources: List[str]
     query: str
 
 
