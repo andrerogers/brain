@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, List, Any
 from anthropic import Anthropic
 
 from engine import BaseEngine
@@ -40,12 +40,20 @@ class AnthropicEngine(BaseEngine):
             for text in stream.text_stream:
                 yield {"event": "token", "data": text}
 
-    async def get_response(self, question):
-        prompt = self._create_prompt(question)
+    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        system_message = None
+        new_messages = []
+
+        for message in messages:
+            if message.get('role') == 'system' and system_message is None:
+                system_message = message
+            else:
+                new_messages.append(message)
 
         response = self.client.messages.create(
             model=self.llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            system=system_message.get('content'),
+            messages=new_messages,
             max_tokens=self.max_tokens
         )
 

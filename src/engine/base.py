@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, List, Any, AsyncGenerator
 
 
 class BaseEngine(ABC):
@@ -8,5 +8,5 @@ class BaseEngine(ABC):
         pass
 
     @abstractmethod
-    async def get_response(self, query: str) -> Dict[str, Any]:
+    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         pass

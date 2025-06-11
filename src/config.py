@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # General LLM settings
     max_tokens: int = Field(1000, env="MAX_TOKENS")
 
+    # MCP Server API Keys
+    exa_api_key: str = Field(None, env="EXA_API_KEY")
+
     # Debug mode
     debug: bool = Field(False, env="DEBUG")
 
@@ -48,7 +51,8 @@ class Settings(BaseSettings):
                 'api_key': self.anthropic_api_key,
                 'embedding_model': self.anthropic_embedding_model,
                 'llm_model': self.anthropic_llm_model,
-                'max_tokens': self.max_tokens
+                'max_tokens': self.max_tokens,
+                'exa_api_key': self.exa_api_key
             }
         elif self.engine_type.lower() == 'openai':
             if not self.openai_api_key:

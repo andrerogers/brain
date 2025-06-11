@@ -137,7 +137,7 @@ To add a new dependency:
 
 ```bash
 # Add a production dependency
-uv pip install package_name
+uv add package_name
 uv pip freeze > requirements.txt
 
 # Add a development dependency

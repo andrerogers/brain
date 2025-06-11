@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, List, Any
 from openai import OpenAI
 
 from engine import BaseEngine
@@ -36,15 +36,10 @@ Answer based only on the information provided. If you don't know, say so."""
             if chunk.choices and chunk.choices[0].delta.content:
                 yield {"event": "token", "data": chunk.choices[0].delta.content}
 
-    def get_response(self, question):
-        sys_message = self._create_system_message(question)
-
+    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         response = self.client.chat.completions.create(
             model=self.llm_model,
-            messages=[
-                {"role": "system", "content": sys_message},
-                {"role": "user", "content": question}
-                ],
+            messages=messages,
             max_tokens=self.max_tokens
         )
 
