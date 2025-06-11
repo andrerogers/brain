@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# uv
+.uv/
+
 # Poetry
 poetry.lock
 

@@ -1,0 +1,9 @@
+# Include main requirements
+-r requirements.txt
+
+# Additional dev dependencies
+black>=25.1.0,<25.2.0
+pytest>=8.3.5,<8.4.0
+mypy>=1.15.0,<1.16.0
+isort>=6.0.1,<6.1.0
+ruff>=0.9.9,<0.10.0
