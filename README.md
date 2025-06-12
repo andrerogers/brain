@@ -1,298 +1,127 @@
-# Brain
+# Brain Project: Multi-Agent System
 
-SSE Server & AI Processing Engine - A modular AI service with interchangeable LLM backends to stream or provide a response.
+## Overview
 
-## Project Structure
+The "Brain" project is a sophisticated multi-agent system designed to facilitate complex interactions between a central Large Language Model (LLM) and various specialized agents, implemented as Multi-Agent Communication Protocol (MCP) servers. This repository details the core components and their interactions.
 
-```
-/brain/
-├── .env                   # Environment variables
-├── .gitignore             # Git ignore file
-├── README.md              # This file
-├── pyproject.toml         # Tool configuration
-├── requirements.txt       # Main dependencies
-├── requirements-dev.txt   # Development dependencies
-├── requirements-lock.txt  # Locked dependencies (generated)
-└── src/                   # Source code
-    ├── api/               # API layer
-    │   ├── models/        # API data models
-    │   │   ├── __init__.py
-    │   │   └── schemas.py
-    │   ├── routes/        # API routes
-    │   ├── __init__.py
-    │   ├── app.py         # FastAPI application setup
-    │   └── dependencies.py # FastAPI dependencies
-    ├── engine/            # Core engine
-    │   ├── implementations/ # LLM provider implementations
-    │   │   ├── __init__.py
-    │   │   ├── anthropic_engine.py
-    │   │   └── openai_engine.py
-    │   ├── __init__.py
-    │   ├── base.py        # Base Engine abstract class
-    │   └── factory.py     # Factory for creating engine instances
-    ├── tests/             # Test suite
-    ├── config.py          # Configuration management
-    └── server.py          # Main entry point
-```
+## Architecture
 
-## Features
+The project's architecture centers around a WebSocket server that acts as the primary communication hub. It orchestrates interactions between connected clients and various MCP servers via a `LangChainMCPClient`. The system is designed to allow an LLM to leverage tools exposed by these MCP servers.
 
-- **Modular Architecture**: Support for multiple LLM providers through a common interface
-- **Streaming Responses**: Real-time streaming responses via Server-Sent Events (SSE)
-- **Easy Configuration**: Configure via environment variables or `.env` file
-- **High-Performance**: Built on FastAPI for high-performance API responses
+- **WebSocket Server:** The central communication point, handling client connections and routing commands to the `LangChainMCPClient`.
 
-## Supported LLM Providers
+- **LangChain MCP Client (****`mcp_brain.mcp_client.LangChainMCPClient`****):** Manages connections to various MCP servers, discovers their exposed tools, and orchestrates tool calls based on requests received from the WebSocket server.
 
-- **Anthropic Claude**: Integrated with Claude 3.7 Sonnet
-- **OpenAI**: Support for OpenAI embeddings and GPT models
+- **MCP Servers:** Specialized agents (e.g., `LangChainExaMCPServer`) that expose functionalities as tools consumable by the `LangChainMCPClient`.
 
-## Tech Stack
+## WebSocket Server
 
-- Python 3.10+
-- FastAPI
-- Anthropic API
-- OpenAI API
-- Pydantic for data validation
-- Server-Sent Events (SSE) for streaming
-- uv for dependency management
+The WebSocket server provides a real-time communication interface for clients to interact with the Brain system. Clients can connect to the server and send JSON-formatted commands to manage MCP server connections, list tools, and send queries for LLM processing.
 
-## Developer Guide
+### How to Connect
 
-### Prerequisites
+The WebSocket server typically runs on `ws://localhost:3789`. You can connect to it using a WebSocket client (e.g., `wscat`, a custom script, or a browser's WebSocket API).
 
-- Python 3.10 or later
-- API keys for Anthropic and/or OpenAI
-- uv package manager (`pip install uv`)
-
-### Environment Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/brain.git
-   cd brain
-   ```
-
-2. Create a virtual environment:
-   ```bash
-   # Create a new virtual environment
-   uv venv
-
-   # Activate the virtual environment
-   # On Windows
-   .venv\Scripts\activate
-   # On macOS/Linux
-   source .venv/bin/activate
-   ```
-
-3. Install dependencies:
-   ```bash
-   # Install main dependencies
-   uv pip install -r requirements.txt
-   
-   # For development, install dev dependencies
-   uv pip install -r requirements-dev.txt
-   ```
-
-### Environment Configuration
-
-Create a `.env` file in the project root:
-```
-# Server settings
-HOST=0.0.0.0
-PORT=8000
-DEBUG=true
-
-# LLM settings
-LLM_TYPE=anthropic  # Options: 'anthropic' or 'openai'
-
-# RAG settings
-RAG_TOP_K=3
-
-# Anthropic settings
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-ANTHROPIC_EMBEDDING_MODEL=claude-3-7-embeddings-v1
-ANTHROPIC_LLM_MODEL=claude-3-7-sonnet-20250219
-
-# OpenAI settings
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_EMBEDDING_MODEL=text-embedding-3-large
-OPENAI_LLM_MODEL=gpt-4
-```
-
-### Running the Server
-
-Start the development server:
-```bash
-python src/server.py
-```
-
-The server will be available at `http://localhost:8000` (or the host/port configured in your settings).
-
-### Development Workflow
-
-#### Adding New Dependencies
-
-To add a new dependency:
+Example using `wscat`:
 
 ```bash
-# Add a production dependency
-uv add package_name
-uv pip freeze > requirements.txt
-
-# Add a development dependency
-uv pip install --dev package_name
-uv pip freeze --dev > requirements-dev.txt
-
-# Generate a lock file
-uv pip freeze > requirements-lock.txt
+wscat -c ws://localhost:3789
 ```
 
-#### Updating Dependencies
+Upon successful connection, the server may send an initial `status` message with information about currently connected MCP servers.
 
-To update dependencies:
+### Supported Commands
 
-```bash
-# Update all dependencies
-uv pip install -U -r requirements.txt
-uv pip freeze > requirements.txt
+All commands are sent as JSON objects over the WebSocket connection. Each command must have a `
 
-# Update a specific package
-uv pip install -U package_name
-uv pip freeze > requirements.txt
+command` field.
 
-# Update development dependencies
-uv pip install -U -r requirements-dev.txt
-uv pip freeze --dev > requirements-dev.txt
-```
+#### 1. `connect_server`
 
-#### Linting and Formatting
+Connects the MCP client to a new or existing MCP server.
 
-```bash
-# Format code with Black
-black src
+- **Purpose:** To register and establish a connection with an MCP server, making its tools available to the system.
 
-# Sort imports with isort
-isort src
+- **Parameters:**
+  - `server_id` (string, required): A unique identifier for the server (e.g., "math_local", "exa_remote").
+    - `server_config` (string or object, required): The configuration for the server.
+      - If a string starting with `http://` or `https://`, it's treated as a remote HTTP server URL.
+      - If a string representing a file path (e.g., `./my_server.py`), it's treated as a local stdio server script.
+      - If an object, it should contain `command`, `args` (optional), and `transport` (e.g., `{"command": "python", "args": ["path/to/script.py"], "transport": "stdio"}`).
 
-# Lint with Ruff
-ruff check src
+#### 2. `disconnect_server`
 
-# Type checking with mypy
-mypy src
-```
+Disconnects from a previously connected MCP server.
 
-#### Running Tests
+- **Purpose:** To remove an MCP server from the system and close its connection.
 
-```bash
-# Run all tests
-pytest
+- **Parameters:**
+  - `server_id` (string, required): The unique identifier of the server to disconnect.
 
-# Run tests with coverage
-pytest --cov=src
+- **Response (`type: server_disconnected`):
 
-# Run specific test file
-pytest tests/test_specific.py
-```
+- **Error Response (`type: error`):
 
-#### Building for Distribution
+- **Example Request:**
 
-Create a distributable package:
+#### 3. `list_tools`
 
-```bash
-# Build a wheel
-python -m build
+Lists the tools available from a specific connected MCP server.
 
-# Install locally for testing
-uv pip install -e .
-```
+- **Purpose:** To discover the functionalities exposed by a connected agent.
 
-### API Usage
+- **Parameters:**
+  - `server_id` (string, required): The unique identifier of the server whose tools you want to list.
 
-#### Streaming Example (JavaScript)
+- **Response (`type: tools_list`):
 
-```javascript
-const eventSource = new EventSource('/query/stream?query=What is RAG?');
+- **Error Response (`type: error`):
 
-eventSource.addEventListener('token', (event) => {
-  // Append each token to the UI
-  document.getElementById('response').textContent += event.data;
-});
+- **Example Request:**
 
-eventSource.addEventListener('metadata', (event) => {
-  // Display source documents
-  const metadata = JSON.parse(event.data);
-  console.log('Sources:', metadata.sources);
-});
+#### 4. `query`
 
-// Handle connection open
-eventSource.onopen = () => {
-  console.log('Connection established');
-};
+Sends a natural language query to the LLM for processing, potentially involving tool use.
 
-// Handle errors
-eventSource.onerror = (error) => {
-  console.error('EventSource error:', error);
-  eventSource.close();
-};
-```
+- **Purpose:** To interact with the central LLM, which may then decide to use available MCP tools to fulfill the request.
 
-#### REST API Examples
+- **Parameters:**
+  - `query` (string, required): The natural language query for the LLM.
 
-You can test the API using curl:
+- **Response (`type: query_response`):
 
-```bash
-# Health check
-curl "http://localhost:8000/info/health"
+- **Intermediate Response (`type: thinking`):
 
-# Get a complete response
-curl -X POST http://localhost:8000/query/response \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is the capital of Canada?"}' \
-  --no-buffer
+- **Error Response (`type: error`):
 
-# Stream a response
-curl -X POST http://localhost:8000/query/stream \
-  -H "Content-Type: application/json" \
-  -H "Accept: text/event-stream" \
-  -d '{"query": "What is the capital of Canada?"}' \
-  --no-buffer
-```
+- **Example Request:**
 
-## Troubleshooting
+#### 5. `get_servers`
 
-### Common Issues
+Retrieves information about all currently connected MCP servers.
 
-1. **Missing dependencies**:
-   - Run `uv pip install -r requirements.txt` to ensure all dependencies are installed
+- **Purpose:** To get an overview of all active MCP agents in the system.
 
-2. **Environment activation issues**:
-   - Ensure you've activated the virtual environment before running any commands
+- **Parameters:** None.
 
-3. **Permission errors**:
-   - Use `sudo` on Linux/macOS if necessary for global installations
-   - On Windows, try running the command prompt as administrator
+- **Response (`type: servers_list`):
 
-4. **API key issues**:
-   - Verify that your `.env` file contains valid API keys
-   - Check for any whitespace in your API keys
+- **Error Response (`type: error`):
 
-### Debugging
+- **Example Request:**
 
-For more verbose output:
+## Setup & Installation (High-Level)
 
-1. Set `DEBUG=true` in your `.env` file
-2. Run the server with debug logging:
-   ```bash
-   uvicorn src.server:app --reload --log-level debug
-   ```
+To get started with the project, you will typically need to:
 
-## Contributing
+1. **Clone the repository:**
 
-1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/my-new-feature`
-3. Commit your changes: `git commit -am 'Add some feature'`
-4. Push to the branch: `git push origin feature/my-new-feature`
-5. Submit a pull request
+1. **Set up a Python virtual environment:**
 
-Please ensure your code follows the project's style guidelines and passes all tests.
+1. **Install dependencies:**
+
+1. **Configure environment variables:** Create a `.env` file in the root directory based on a template (if provided) and fill in your specific configurations (e.g., API keys, local paths).
+
+1. **Run the application:**
+  - To start the WebSocket server, you would typically run `python -m brain.src.main` or a similar entry point.
+
