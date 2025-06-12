@@ -67,16 +67,15 @@ async def crawl_with_exa(url: str) -> Dict[str, Any]:
     """Fetch and extract content from a URL using Exa API."""
     try:
         # Call Exa API to crawl the URL
-        content_response = exa_client.get_content(
-            url=url,
-            include_raw_html=False,
+        content_response = exa_client.get_contents(
+            urls=[url],
+            text={"include_html_tags": False}
         )
         # Extract content
-        if content_response.success:
+        if len(content_response.results) > 0:
             return {
                 "success": True,
-                "title": content_response.title or "No title",
-                "text": content_response.text,
+                "text": content_response.results[0].text,
                 "url": url
             }
         else:
@@ -123,7 +122,7 @@ async def crawl_url(url: str) -> str:
     print(f"Crawling URL: {url}", file=sys.stderr)
     result = await crawl_with_exa(url)
     if result["success"]:
-        response_text = f"Content from: {url}\n\nTitle: {result['title']}\n\n{result['text']}"
+        response_text = f"Content from: {url}\n\n{result['text']}"
     else:
         response_text = f"Failed to crawl URL: {url}. Error: {result['error']}"
     return response_text

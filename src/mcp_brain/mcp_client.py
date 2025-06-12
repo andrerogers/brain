@@ -148,6 +148,72 @@ class MCPClient:
             self.logger.error(f"Error calling tool {tool_name}: {e}", exc_info=True)
             raise
 
+    async def _format_tools_for_llm(self) -> List[Dict[str, Any]]:
+        available_tools = []
+
+        if not self._multi_server_client:
+            self.logger.warning("MultiServerMCPClient not initialized. No tools available.")
+            return []
+
+        try:
+            mcp_tools_response = await self._multi_server_client.get_tools()
+            for tool in mcp_tools_response:
+                input_schema = {}
+                if tool.args_schema:
+                    if isinstance(tool.args_schema, dict):
+                        input_schema = tool.args_schema
+                    else:
+                        try:
+                            input_schema = tool.args_schema.model_json_schema()
+                        except AttributeError:
+                            input_schema = tool.args_schema.schema()
+                available_tools.append({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": input_schema
+                })
+            self.logger.info(f"Retrieved {len(available_tools)} tools for query processing.")
+        except Exception as e:
+            self.logger.error(f"Error retrieving tools for query processing: {e}", exc_info=True)
+        return available_tools
+
+    async def _execute_tool_and_update_history(
+        self, 
+        tool_name: str, 
+        tool_args: Dict[str, Any], 
+        tool_use_id: str, 
+        session: Any, 
+        messages: List[Dict[str, Any]],
+        final_text_output: List[str]
+    ):
+        try:
+            tool_result = await self.call_tool("exa", tool_name, tool_args, session)
+            self.logger.info(f"Tool {tool_name} executed. Result: {tool_result}")
+            final_text_output.append(f"[Tool Result: {tool_result}]")
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": str(tool_result)
+                    }
+                ]
+            })
+        except Exception as e:
+            self.logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+            final_text_output.append(f"[Error executing tool {tool_name}: {e}]")
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": f"Error: {e}"
+                    }
+                ]
+            })
+
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
         self.logger.info(f"Processing query: {query}")
@@ -156,31 +222,7 @@ class MCPClient:
             self.logger.error("LLM Engine not provided to MCPClient. Cannot process query.")
             return "Error: LLM Engine not configured."
 
-        available_tools_for_llm = []
-        if self._multi_server_client:
-            try:
-                # Get tools from MCP servers and format them for Anthropic API
-                mcp_tools_response = await self._multi_server_client.get_tools()
-                for tool in mcp_tools_response:
-                    input_schema = {}
-                    if tool.args_schema:
-                        if isinstance(tool.args_schema, dict):
-                            input_schema = tool.args_schema
-                        else:
-                            try:
-                                input_schema = tool.args_schema.model_json_schema()
-                            except AttributeError:
-                                input_schema = tool.args_schema.schema()
-                    available_tools_for_llm.append({
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": input_schema
-                    })
-                self.logger.info(f"Retrieved {len(available_tools_for_llm)} tools for query processing.")
-            except Exception as e:
-                self.logger.error(f"Error retrieving tools for query processing: {e}", exc_info=True)
-        else:
-            self.logger.warning("MultiServerMCPClient not initialized. Proceeding without tools.")
+        available_tools_for_llm = await self._format_tools_for_llm()
 
         messages = [
             {
@@ -199,7 +241,7 @@ class MCPClient:
                 await session.initialize()
 
                 try:
-                    while True: # Loop to handle multiple tool uses in a turn
+                    while True:
                         response = self.engine.client.messages.create(
                             model=self.engine.llm_model,
                             max_tokens=self.engine.max_tokens,
@@ -208,7 +250,7 @@ class MCPClient:
                         )
 
                         tool_use_occurred = False
-                        current_turn_content = [] # Accumulate content for the current assistant turn
+                        current_turn_content = []
 
                         for content_block in response.content:
                             if content_block.type == 'text':
@@ -232,37 +274,8 @@ class MCPClient:
                                     "content": current_turn_content
                                 })
 
-                                try:
-                                    # Pass the persistent session to call_tool
-                                    tool_result = await self.call_tool("exa", tool_name, tool_args, session)
-                                    self.logger.info(f"Tool {tool_name} executed. Result: {tool_result}")
-                                    final_text_output.append(f"[Tool Result: {tool_result}]")
+                                await self._execute_tool_and_update_history(tool_name, tool_args, tool_use_id, session, messages, final_text_output)
 
-                                    # Add the user's tool_result message to the conversation history
-                                    messages.append({
-                                        "role": "user",
-                                        "content": [
-                                            {
-                                                "type": "tool_result",
-                                                "tool_use_id": tool_use_id,
-                                                "content": str(tool_result) # Ensure content is string
-                                            }
-                                        ]
-                                    })
-                                except Exception as e:
-                                    self.logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-                                    final_text_output.append(f"[Error executing tool {tool_name}: {e}]")
-                                    # Add an error tool_result to the conversation history
-                                    messages.append({
-                                        "role": "user",
-                                        "content": [
-                                            {
-                                                "type": "tool_result",
-                                                "tool_use_id": tool_use_id,
-                                                "content": f"Error: {e}"
-                                            }
-                                        ]
-                                    })
                                 # Clear current_turn_content as it's been added to messages
                                 current_turn_content = []
 
