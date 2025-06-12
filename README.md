@@ -6,13 +6,13 @@ The "Brain" project is a sophisticated multi-agent system designed to facilitate
 
 ## Architecture
 
-The project's architecture centers around a WebSocket server that acts as the primary communication hub. It orchestrates interactions between connected clients and various MCP servers via a `LangChainMCPClient`. The system is designed to allow an LLM to leverage tools exposed by these MCP servers.
+The project's architecture centers around a WebSocket server that acts as the primary communication hub. It orchestrates interactions between connected clients and various MCP servers via a `BrainMCPClient`. The system is designed to allow an LLM to leverage tools exposed by these MCP servers.
 
-- **WebSocket Server:** The central communication point, handling client connections and routing commands to the `LangChainMCPClient`.
+- **WebSocket Server:** The central communication point, handling client connections and routing commands to the `BrainMCPClient`.
 
-- **LangChain MCP Client (****`mcp_brain.mcp_client.LangChainMCPClient`****):** Manages connections to various MCP servers, discovers their exposed tools, and orchestrates tool calls based on requests received from the WebSocket server.
+- **Brain MCP Client (****`mcp_brain.mcp_client.BrainMCPClient`****):** Manages connections to various MCP servers, discovers their exposed tools, and orchestrates tool calls based on requests received from the WebSocket server.
 
-- **MCP Servers:** Specialized agents (e.g., `LangChainExaMCPServer`) that expose functionalities as tools consumable by the `LangChainMCPClient`.
+- **MCP Servers:** Specialized agents (e.g., `BrainExaMCPServer`) that expose functionalities as tools consumable by the `BrainMCPClient`.
 
 ## WebSocket Server
 
