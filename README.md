@@ -1,4 +1,4 @@
-# Brain Project: Multi-Agent System
+# Brain
 
 ## Overview
 
@@ -7,6 +7,90 @@ The "Brain" project is a multi-agent system designed to facilitate complex inter
 ## WebSocket Server
 
 The WebSocket server provides a real-time communication interface for clients to interact with the Brain system. Clients can connect to the server and send JSON-formatted commands to manage MCP server connections, list tools, and send queries for LLM processing.
+
+## Development
+#### Create a new virtual environment
+````bash
+uv venv
+````
+
+#### Activate the virtual environment
+````bash
+source .venv/bin/activate
+````
+
+#### Install main dependencies
+````bash
+uv pip install -r requirements.txt
+````
+
+#### For development, install dev dependencies
+````bash
+uv pip install -r requirements-dev.txt
+
+````
+
+#### Environment Configuration
+Create a .env file in the project root:
+
+````bash
+# Server settings
+HOST=0.0.0.0
+PORT=8000
+DEBUG=true
+
+# LLM settings
+LLM_TYPE=anthropic  # Options: 'anthropic' or 'openai'
+
+# Anthropic settings
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+ANTHROPIC_EMBEDDING_MODEL=claude-3-7-embeddings-v1
+ANTHROPIC_LLM_MODEL=claude-3-7-sonnet-20250219
+
+# OpenAI settings
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_EMBEDDING_MODEL=text-embedding-3-large
+OPENAI_LLM_MODEL=gpt-4
+````
+
+#### Running the Server
+
+````bash
+python src/server.py
+````
+
+The server will be available at http://localhost:8000 (or the host/port configured in your settings).
+
+#### Add a production dependency
+````bash
+uv add package_name
+uv pip freeze > requirements.txt
+````
+
+#### Add a development dependency
+````bash
+uv pip install --dev package_name
+uv pip freeze --dev > requirements-dev.txt
+````
+
+
+#### Update all dependencies
+````bash
+uv pip install -U -r requirements.txt
+uv pip freeze > requirements.txt
+````
+
+#### Update a specific package
+````bash
+uv pip install -U package_name
+uv pip freeze > requirements.txt
+````
+
+#### Update development dependencies
+````bash
+uv pip install -U -r requirements-dev.txt
+uv pip freeze --dev > requirements-dev.txt
+````
 
 ### How to Connect
 
