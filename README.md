@@ -2,17 +2,7 @@
 
 ## Overview
 
-The "Brain" project is a sophisticated multi-agent system designed to facilitate complex interactions between a central Large Language Model (LLM) and various specialized agents, implemented as Multi-Agent Communication Protocol (MCP) servers. This repository details the core components and their interactions.
-
-## Architecture
-
-The project's architecture centers around a WebSocket server that acts as the primary communication hub. It orchestrates interactions between connected clients and various MCP servers via a `BrainMCPClient`. The system is designed to allow an LLM to leverage tools exposed by these MCP servers.
-
-- **WebSocket Server:** The central communication point, handling client connections and routing commands to the `BrainMCPClient`.
-
-- **Brain MCP Client (****`mcp_brain.mcp_client.BrainMCPClient`****):** Manages connections to various MCP servers, discovers their exposed tools, and orchestrates tool calls based on requests received from the WebSocket server.
-
-- **MCP Servers:** Specialized agents (e.g., `BrainExaMCPServer`) that expose functionalities as tools consumable by the `BrainMCPClient`.
+The "Brain" project is a multi-agent system designed to facilitate complex interactions between a central Large Language Model (LLM) and various specialized agents, implemented with Multi-Agent Communication Protocol (MCP).
 
 ## WebSocket Server
 
@@ -49,22 +39,7 @@ Connects the MCP client to a new or existing MCP server.
       - If a string representing a file path (e.g., `./my_server.py`), it's treated as a local stdio server script.
       - If an object, it should contain `command`, `args` (optional), and `transport` (e.g., `{"command": "python", "args": ["path/to/script.py"], "transport": "stdio"}`).
 
-#### 2. `disconnect_server`
-
-Disconnects from a previously connected MCP server.
-
-- **Purpose:** To remove an MCP server from the system and close its connection.
-
-- **Parameters:**
-  - `server_id` (string, required): The unique identifier of the server to disconnect.
-
-- **Response (`type: server_disconnected`):
-
-- **Error Response (`type: error`):
-
-- **Example Request:**
-
-#### 3. `list_tools`
+#### 2. `list_tools`
 
 Lists the tools available from a specific connected MCP server.
 
@@ -79,7 +54,7 @@ Lists the tools available from a specific connected MCP server.
 
 - **Example Request:**
 
-#### 4. `query`
+#### 3. `query`
 
 Sends a natural language query to the LLM for processing, potentially involving tool use.
 
@@ -96,7 +71,7 @@ Sends a natural language query to the LLM for processing, potentially involving 
 
 - **Example Request:**
 
-#### 5. `get_servers`
+#### 4. `get_servers`
 
 Retrieves information about all currently connected MCP servers.
 
