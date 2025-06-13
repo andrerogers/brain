@@ -36,7 +36,7 @@ Answer based only on the information provided. If you don't know, say so."""
             if chunk.choices and chunk.choices[0].delta.content:
                 yield {"event": "token", "data": chunk.choices[0].delta.content}
 
-    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def get_response(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], system_message: str = '') -> Dict[str, Any]:
         response = self.client.chat.completions.create(
             model=self.llm_model,
             messages=messages,

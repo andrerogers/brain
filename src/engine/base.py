@@ -8,5 +8,5 @@ class BaseEngine(ABC):
         pass
 
     @abstractmethod
-    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def get_response(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], system_message: str = '') -> Dict[str, Any]:
         pass

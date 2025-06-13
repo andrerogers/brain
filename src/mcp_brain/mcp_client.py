@@ -242,14 +242,10 @@ class MCPClient:
 
                 try:
                     while True:
-                        response = self.engine.client.messages.create(
-                            model=self.engine.llm_model,
-                            max_tokens=self.engine.max_tokens,
-                            messages=messages,
-                            tools=available_tools_for_llm
-                        )
+                        response = await self.engine.get_response(messages, available_tools_for_llm)
 
                         tool_use_occurred = False
+                        messages = []
                         current_turn_content = []
 
                         for content_block in response.content:
@@ -292,13 +288,7 @@ class MCPClient:
                     final_text_output.append(f"Error during query processing: {e}")
         else:
             self.logger.warning("No 'exa' server configured or MultiServerMCPClient not initialized. Proceeding without tool execution.")
-            # If no session is established, proceed with LLM call without tools
-            response = self.engine.client.messages.create(
-                model=self.engine.llm_model,
-                max_tokens=self.engine.max_tokens,
-                messages=messages,
-                tools=[] # No tools available
-            )
+            response = await self.engine.get_response(messages)
             for content_block in response.content:
                 if content_block.type == 'text':
                     final_text_output.append(content_block.text)
@@ -333,155 +323,3 @@ class MCPClient:
             if server_info:
                 result[server_id] = server_info
         return result
-
-    async def cleanup(self):
-        """Cleans up all connected MCP servers."""
-        if self._multi_server_client:
-            await self._multi_server_client.cleanup()
-            self.logger.info("Cleaned up MultiServerMCPClient.")
-
-
-# # Example usage (for testing purposes)
-# async def main_test():
-#     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-#     logger = logging.getLogger("MCPClientTest")
-#
-#     # Create a dummy engine (replace with your actual AnthropicEngine instance)
-#     class DummyEngine(BaseEngine):
-#         def __init__(self):
-#             self.client = None # Mock client for testing
-#             self.llm_model = "dummy-model"
-#             self.max_tokens = 1000
-#
-#         async def stream_response(self, query: str) -> AsyncGenerator[Dict[str, Any], None]:
-#             yield {"event": "token", "data": "Dummy stream response"}
-#
-#         async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-#             # Mock LLM response for testing tool calling
-#             if "web_search_exa" in messages[-1]["content"]:
-#                 return {"answer": "I used web_search_exa. The capital of France is Paris."}
-#             return {"answer": "Dummy response: " + messages[-1]["content"]}
-#
-#     engine = DummyEngine()
-#     client = MCPClient(engine=engine, logger=logger)
-#
-#     # Create a dummy local server script for testing
-#     math_server_script = """
-# #!/usr/bin/env python3
-# import asyncio
-# import sys
-# from mcp.server.fastmcp import FastMCP
-# from mcp.shared.types import Tool
-#
-# class MathServer:
-#     def __init__(self):
-#         self.tools = [
-#             Tool(
-#                 name="add",
-#                 description="Adds two numbers",
-#                 inputSchema={
-#                     "type": "object",
-#                     "properties": {
-#                         "a": {"type": "number"},
-#                         "b": {"type": "number"}
-#                     },
-#                     "required": ["a", "b"]
-#                 }
-#             ),
-#             Tool(
-#                 name="subtract",
-#                 description="Subtracts two numbers",
-#                 inputSchema={
-#                     "type": "object",
-#                     "properties": {
-#                         "a": {"type": "number"},
-#                         "b": {"type": "number"}
-#                     },
-#                     "required": ["a", "b"]
-#                 }
-#             )
-#         ]
-#
-#     async def add(self, a: float, b: float) -> float:
-#         return a + b
-#
-#     async def subtract(self, a: float, b: float) -> float:
-#         return a - b
-#
-#     async def get_tools(self):
-#         return self.tools
-#
-#     async def call_tool(self, tool_name: str, arguments: dict):
-#         if tool_name == "add":
-#             return await self.add(**arguments)
-#         elif tool_name == "subtract":
-#             return await self.subtract(**arguments)
-#         else:
-#             raise ValueError(f"Unknown tool: {tool_name}")
-#
-# async def main():
-#     server = MathServer()
-#     mcp = FastMCP(server)
-#     await mcp.run_stdio_async()
-#
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(main())
-#     except KeyboardInterrupt:
-#         print("\nMath server stopped.", file=sys.stderr)
-#
-# """
-#     with open("math_server.py", "w") as f:
-#         f.write(math_server_script)
-#     os.chmod("math_server.py", 0o755)
-#     logger.info("Created dummy math_server.py")
-#
-#     # Connect to a local stdio server
-#     connect_success = await client.connect_server("math_local", "./math_server.py")
-#     logger.info(f"Connection to math_local successful: {connect_success}")
-#
-#     # List tools from the local server
-#     tools = await client.list_tools("math_local")
-#     logger.info(f"Tools from math_local: {[tool.name for tool in tools]}")
-#
-#     # Call a tool on the local server
-#     if tools:
-#         try:
-#             add_result = await client.call_tool("math_local", "add", {"a": 5, "b": 3})
-#             logger.info(f"Result of add(5, 3): {add_result}")
-#         except Exception as e:
-#             logger.error(f"Error calling add tool: {e}")
-#
-#     # Test processing a query that might involve tool use (requires a real LLM engine)
-#     # For this dummy engine, it will just return a dummy response.
-#     query_result = await client.process_query("What is 5 plus 3?")
-#     logger.info(f"Query result: {query_result}")
-#
-#     # Test connecting to a (dummy) remote server
-#     # In a real test, you would need a running remote MCP server.
-#     # For this example, we\'ll just add the config and expect listing tools to fail gracefully.
-#     remote_connect_success = await client.connect_server("dummy_remote", "http://localhost:12345/mcp/")
-#     logger.info(f"Connection attempt to dummy_remote: {remote_connect_success}") # Expected to be True if config is added
-#
-#     remote_tools = await client.list_tools("dummy_remote") # Expected to be empty or fail gracefully
-#     logger.info(f"Tools from dummy_remote: {[tool.name for tool in remote_tools]}")
-#
-#     all_servers_info_after_remote = await client.get_all_servers()
-#     logger.info(f"All servers info after remote: {all_servers_info_after_remote}")
-#
-#     # Test disconnect
-#     await client.disconnect_server("math_local")
-#     all_servers_info_after_disconnect = await client.get_all_servers()
-#     logger.info(f"All servers info after disconnect: {all_servers_info_after_disconnect}")
-#
-#     await client.cleanup()
-#     os.remove("math_server.py")
-#     logger.info("Cleaned up dummy math_server.py")
-#
-# if __name__ == "__main__":
-#     # This is for standalone testing of the client.
-#     # Ensure you have langchain_mcp_adapters and mcp installed.
-#     # pip install langchain-mcp-adapters mcp
-#     asyncio.run(main_test())
-#
-#
