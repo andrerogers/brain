@@ -9,25 +9,9 @@ class AnthropicEngine(BaseEngine):
         self.api_key = config.get('api_key')
         self.llm_model = config.get('llm_model', 'claude-3-7-sonnet-20250219')
         self.max_tokens = config.get('max_tokens', 1000)
+        self.messages = []
 
         self.client = Anthropic(api_key=self.api_key)
-
-    def _create_prompt(self, query: str, context: str = "") -> str:
-        if len(context) > 0:
-            """Create a prompt with the query and context."""
-            return f"""Use the following information to answer the user's question:
-
-    Context:
-    {context}
-
-    User Question: {query}
-
-    Answer:"""
-        else:
-            return f"""Answer the user's question:
-    User Question: {query}
-
-    Answer:"""
 
     async def stream_response(self, question):
         prompt = self._create_prompt(question)
@@ -40,23 +24,23 @@ class AnthropicEngine(BaseEngine):
             for text in stream.text_stream:
                 yield {"event": "token", "data": text}
 
-    async def get_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        system_message = None
-        new_messages = []
+    async def get_response(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], system_message: str = '') -> Dict[str, Any]:
+        self.messages.extend(messages)
 
-        for message in messages:
-            if message.get('role') == 'system' and system_message is None:
-                system_message = message
-            else:
-                new_messages.append(message)
+        if system_message == '':
+            response = self.client.messages.create(
+                model=self.llm_model,
+                messages=self.messages,
+                max_tokens=self.max_tokens,
+                tools=tools
+            )
+        else:
+            response = self.client.messages.create(
+                model=self.llm_model,
+                system=system_message,
+                messages=self.messages,
+                max_tokens=self.max_tokens,
+                tools=tools
+            )
 
-        response = self.client.messages.create(
-            model=self.llm_model,
-            system=system_message.get('content'),
-            messages=new_messages,
-            max_tokens=self.max_tokens
-        )
-
-        return {
-            "answer": response.content[0].text
-        }
+        return response

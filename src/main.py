@@ -62,12 +62,13 @@ async def main():
 
     try:
         logging.getLogger("brain").setLevel(logging.DEBUG)
-        await server.listen()
-    except KeyboardInterrupt:
-        print("Interrupted by user")
+        await server.listen()  # This now handles its own shutdown
     except Exception as e:
         print(f"Error running daemon: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

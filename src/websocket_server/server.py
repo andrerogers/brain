@@ -1,6 +1,5 @@
 import os
 import json
-import signal
 import asyncio
 import websockets
 
@@ -105,8 +104,6 @@ class WebSocketServer:
 
         if command == "connect_server":
             await self.handle_connect_server(websocket, data)
-        elif command == "disconnect_server":
-            await self.handle_disconnect_server(websocket, data)
         elif command == "list_tools":
             await self.handle_list_tools(websocket, data)
         elif command == "query":
@@ -120,33 +117,14 @@ class WebSocketServer:
             }))
 
     async def listen(self):
-
-
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            """Handle termination signals"""
-            self.logger.info("Received shutdown signal")
-            asyncio.create_task(self.shutdown())
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, signal_handler)
-
         self.logger.info("Starting daemon")
-
         await self.start()
-
-        # Keep the server running indefinitely
         try:
             self.logger.info("Server running. Press Ctrl+C to exit.")
-            # Wait forever - this is the key to keeping the server running
-            forever = asyncio.Future()
-            await forever
-        except asyncio.CancelledError:
-            self.logger.info("Main task cancelled")
-        except Exception as e:
-            self.logger.error(f"Error in main: {e}", exc_info=True)
+            # Just wait indefinitely - KeyboardInterrupt will break this
+            while True:
+                await asyncio.sleep(1)
         finally:
-            # Make sure to shut down properly
             await self.shutdown()
 
     async def handle_connect_server(self, websocket, data):
@@ -200,47 +178,6 @@ class WebSocketServer:
                 }))
         except Exception as e:
             self.logger.error(f"Error connecting to server: {e}")
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error": str(e)
-            }))
-
-    async def handle_disconnect_server(self, websocket, data):
-        server_id = data.get("server_id")
-
-        if not server_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error": "Missing server_id"
-            }))
-            return
-
-        try:
-            success = await self.mcp_client.disconnect_server(server_id)
-
-            if success:
-                mcp_settings = self.load_mcp_settings()
-                servers = mcp_settings.get("servers", [])
-
-                servers = [s for s in servers if s.get("id") != server_id]
-                mcp_settings["servers"] = servers
-
-                with open(self.mcp_file_path, 'w') as f:
-                    json.dump(mcp_settings, f, indent=2)
-
-                await websocket.send(json.dumps({
-                    "type": "server_disconnected",
-                    "server_id": server_id
-                }))
-
-                await self.broadcast_server_status()
-            else:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "error": f"Failed to disconnect from server {server_id}"
-                }))
-        except Exception as e:
-            self.logger.error(f"Error disconnecting from server: {e}")
             await websocket.send(json.dumps({
                 "type": "error",
                 "error": str(e)
@@ -381,28 +318,26 @@ class WebSocketServer:
                         self.logger.error(
                             f"Error connecting to server {server_id}: {e}")
 
-        self.logger.info(
-            f"Starting websocket server at ws://{self.host}:{self.port}")
+        self.logger.info(f"Starting websocket server at ws://{self.host}:{self.port}")
         server = await websockets.serve(self.websocket_handler, self.host, self.port)
         self.logger.info(f"Brain started with PID {os.getpid()}")
         return server
 
     async def shutdown(self):
         self.logger.info("Shutting down...")
-
-        if self.mcp_client:
-            await self.mcp_client.cleanup()
-
         try:
-            for task in asyncio.all_tasks():
-                if task is not asyncio.current_task():
+            if hasattr(self, 'server') and self.server:
+                self.logger.info("Closing websocket server...")
+                self.server.close()
+                await self.server.wait_closed()
+            if self.connected_clients:
+                self.logger.info(f"Closing {len(self.connected_clients)} connections...")
+                for client in list(self.connected_clients):
                     try:
-                        task.cancel()
-                    except Exception as e:
-                        self.logger.error(f"Error cancelling task: {e}")
-            await asyncio.sleep(0.5)
+                        await client.close()
+                    except:
+                        pass
+                self.connected_clients.clear()
+            self.logger.info("......")
         except Exception as e:
-            self.logger.error(f"Error during shutdown: {e}", exc_info=True)
-
-
-
+            self.logger.error(f"Shutdown error: {e}")
