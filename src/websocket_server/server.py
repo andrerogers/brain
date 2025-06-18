@@ -6,7 +6,7 @@ import websockets
 from pathlib import Path
 from typing import Optional
 
-from mcp_brain import MCPClient
+from mcp_brain.mcp_client import MCPClient
 
 
 class WSSettings:
@@ -292,11 +292,19 @@ class WebSocketServer:
             print(traceback.format_exc())
 
     async def start(self):
+        # First, auto-connect to built-in development servers
+        self.logger.info("Auto-connecting to built-in development servers...")
+        builtin_results = await self.mcp_client.auto_connect_builtin_servers()
+        
+        connected_builtin = sum(1 for success in builtin_results.values() if success)
+        self.logger.info(f"Connected to {connected_builtin}/{len(builtin_results)} built-in servers")
+        
+        # Then connect to user-configured servers
         mcp_settings = self.load_mcp_settings()
         servers = mcp_settings.get("servers", [])
 
         if servers:
-            self.logger.info(f"Connecting to {len(servers)} configured MCP servers")
+            self.logger.info(f"Connecting to {len(servers)} user-configured MCP servers")
 
             for server in servers:
                 server_id = server.get("id")
@@ -318,6 +326,13 @@ class WebSocketServer:
                         self.logger.error(
                             f"Error connecting to server {server_id}: {e}")
 
+        # Log final server status
+        all_servers = await self.mcp_client.get_all_servers()
+        self.logger.info(f"Brain initialization complete:")
+        self.logger.info(f"  - Total MCP servers connected: {len(all_servers)}")
+        for server_id, server_info in all_servers.items():
+            self.logger.info(f"    • {server_id}: {server_info['tools_count']} tools available")
+        
         self.logger.info(f"Starting websocket server at ws://{self.host}:{self.port}")
         server = await websockets.serve(self.websocket_handler, self.host, self.port)
         self.logger.info(f"Brain started with PID {os.getpid()}")
