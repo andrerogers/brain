@@ -6,6 +6,7 @@ using FastMCP and decorator pattern as per official MCP documentation
 
 import os
 import sys
+import re
 import exa_py
 import asyncio
 import argparse
@@ -63,25 +64,96 @@ async def search_with_exa(query: str, num_results: int = 5) -> List[Dict[str, An
         return []
 
 
+def clean_content(text: str) -> str:
+    """Clean extracted content by removing common non-content elements."""
+    if not text:
+        return ""
+    
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    # Common patterns to filter out
+    skip_patterns = [
+        # Navigation and menu items
+        'menu', 'navigation', 'nav', 'breadcrumb',
+        # Footer content
+        'footer', 'copyright', '©', 'all rights reserved',
+        # Social media and sharing
+        'share', 'tweet', 'facebook', 'instagram', 'linkedin', 'follow us',
+        # Ads and promotional
+        'advertisement', 'sponsored', 'promo', 'sale', 'discount',
+        # Cookie and privacy notices
+        'cookie', 'privacy policy', 'terms of service', 'gdpr',
+        # Common UI elements
+        'skip to content', 'back to top', 'scroll',
+        # Empty or very short lines that are likely UI elements
+    ]
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+            
+        # Skip very short lines (likely UI elements)
+        if len(line) < 10:
+            continue
+            
+        # Skip lines that match common non-content patterns
+        line_lower = line.lower()
+        if any(pattern in line_lower for pattern in skip_patterns):
+            continue
+            
+        # Skip lines that are mostly punctuation or numbers (likely formatting)
+        if len([c for c in line if c.isalnum()]) < len(line) * 0.5:
+            continue
+            
+        cleaned_lines.append(line)
+    
+    # Join lines and remove excessive whitespace
+    cleaned_text = '\n'.join(cleaned_lines)
+    
+    # Remove multiple consecutive newlines
+    cleaned_text = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned_text)
+    
+    return cleaned_text.strip()
+
+
 async def crawl_with_exa(url: str) -> Dict[str, Any]:
-    """Fetch and extract content from a URL using Exa API."""
+    """Fetch and extract main content from a URL using Exa API with content cleaning."""
     try:
-        # Call Exa API to crawl the URL
+        # Call Exa API to crawl the URL with optimized settings for main content
         content_response = exa_client.get_contents(
             urls=[url],
-            text={"include_html_tags": False}
+            text={
+                "include_html_tags": False,
+                "max_characters": 10000,  # Limit content length
+                "include_links": False    # Exclude link URLs to reduce noise
+            }
         )
-        # Extract content
+        
+        # Extract and clean content
         if len(content_response.results) > 0:
+            raw_text = content_response.results[0].text
+            cleaned_text = clean_content(raw_text)
+            
+            if not cleaned_text:
+                return {
+                    "success": False,
+                    "error": "No meaningful content extracted after cleaning",
+                    "url": url
+                }
+            
             return {
                 "success": True,
-                "text": content_response.results[0].text,
+                "text": cleaned_text,
                 "url": url
             }
         else:
             return {
                 "success": False,
-                "error": content_response.error,
+                "error": getattr(content_response, 'error', 'No content returned'),
                 "url": url
             }
     except Exception as e:
@@ -115,14 +187,17 @@ async def web_search_exa(query: str, num_results: int = 5) -> str:
 
 @mcp.tool()
 async def crawl_url(url: str) -> str:
-    """Fetch and extract content from a specific URL using Exa AI.
+    """Fetch and extract main content from a specific URL using Exa AI with content cleaning.
+    This tool filters out navigation menus, footers, ads, and other non-content elements.
     Args:
         url: The URL to crawl
     """
     print(f"Crawling URL: {url}", file=sys.stderr)
     result = await crawl_with_exa(url)
     if result["success"]:
-        response_text = f"Content from: {url}\n\n{result['text']}"
+        content_length = len(result['text'])
+        print(f"Successfully extracted {content_length} characters of cleaned content", file=sys.stderr)
+        response_text = f"Main content from: {url}\n\n{result['text']}"
     else:
         response_text = f"Failed to crawl URL: {url}. Error: {result['error']}"
     return response_text

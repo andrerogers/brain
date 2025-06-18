@@ -226,7 +226,7 @@ class WebSocketServer:
 
             response = await self.mcp_client.process_query(query)
 
-            print(response)
+            self.logger.debug(f"Query response: {response}")
 
             await websocket.send(json.dumps({
                 "type": "query_response",

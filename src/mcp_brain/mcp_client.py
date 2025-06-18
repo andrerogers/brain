@@ -189,7 +189,7 @@ class MCPClient:
         try:
             tool_result = await self.call_tool("exa", tool_name, tool_args, session)
             self.logger.info(f"Tool {tool_name} executed. Result: {tool_result}")
-            final_text_output.append(f"[Tool Result: {tool_result}]")
+            self.logger.debug(f"[Tool Result: {tool_result}]")
             messages.append({
                 "role": "user",
                 "content": [
@@ -202,7 +202,7 @@ class MCPClient:
             })
         except Exception as e:
             self.logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-            final_text_output.append(f"[Error executing tool {tool_name}: {e}]")
+            self.logger.debug(f"[Error executing tool {tool_name}: {e}]")
             messages.append({
                 "role": "user",
                 "content": [
@@ -259,7 +259,7 @@ class MCPClient:
                                 tool_use_id = content_block.id
 
                                 self.logger.info(f"LLM requested tool: {tool_name} with args: {tool_args}")
-                                final_text_output.append(f"[LLM requested tool: {tool_name} with args: {tool_args}]")
+                                self.logger.debug(f"[LLM requested tool: {tool_name} with args: {tool_args}]")
 
                                 # Append the tool_use block to the current turn's content
                                 current_turn_content.append(content_block)

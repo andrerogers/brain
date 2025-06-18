@@ -34,20 +34,24 @@ def validate_paths():
 async def main():
     validate_paths()
 
+    settings = get_settings()
+    
+    # Set logging level based on debug setting
+    log_level = logging.DEBUG if settings.debug else logging.INFO
+    
     logging.basicConfig(
         filename=LOG_FILE,
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     logger = logging.getLogger("brain")
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(log_level)
     formatter = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    settings = get_settings()
     engine = await get_engine(settings)
 
     ws_settings = WSSettings(
@@ -61,7 +65,6 @@ async def main():
     server = WebSocketServer(logger, settings, ws_settings, engine)
 
     try:
-        logging.getLogger("brain").setLevel(logging.DEBUG)
         await server.listen()  # This now handles its own shutdown
     except Exception as e:
         print(f"Error running daemon: {e}")
