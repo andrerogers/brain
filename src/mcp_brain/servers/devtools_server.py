@@ -33,7 +33,12 @@ SAFE_COMMANDS = {
     "mvn": ["mvn", "gradle"],
     "test_runners": ["pytest", "jest", "mocha", "phpunit", "cargo test", "go test"],
     "linters": ["eslint", "pylint", "flake8", "black", "prettier", "rustfmt"],
-    "formatters": ["black", "isort", "prettier", "rustfmt", "gofmt"]
+    "formatters": ["black", "isort", "prettier", "rustfmt", "gofmt"],
+    "shell_utils": ["echo", "ls", "pwd", "cat", "head", "tail", "wc", "grep", "find", "which", "whoami", "date", "uname"],
+    "file_utils": ["mkdir", "rmdir", "touch", "cp", "mv", "chmod", "stat", "file", "basename", "dirname"],
+    "system_info": ["ps", "top", "df", "du", "free", "uptime", "env", "printenv"],
+    "text_processing": ["sort", "uniq", "cut", "awk", "sed", "tr", "diff"],
+    "archive_utils": ["tar", "gzip", "gunzip", "zip", "unzip"]
 }
 
 def is_command_safe(command: str) -> bool:

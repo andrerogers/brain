@@ -29,6 +29,8 @@ ALLOWED_PATHS = [
     str(Path.home()),  # User home directory
     "/tmp",            # Temporary directory
     os.getcwd(),       # Current working directory
+    "/mnt/dev_drive",  # Development drive
+    "/mnt/data-lake",  # Data lake for broader access
 ]
 
 def is_path_allowed(path: str) -> bool:
@@ -40,7 +42,14 @@ def safe_path_join(*args) -> str:
     """Safely join path components and ensure it's within allowed paths"""
     path = os.path.abspath(os.path.join(*args))
     if not is_path_allowed(path):
-        raise PermissionError(f"Access denied to path: {path}")
+        # Instead of immediately raising an error, provide a helpful message
+        raise PermissionError(
+            f"Access denied to path: {path}\n"
+            f"This path is outside the allowed directories. "
+            f"Allowed paths include:\n" + 
+            "\n".join(f"  - {allowed}" for allowed in ALLOWED_PATHS) + 
+            f"\n\nTo access this path, please add it to the allowed paths configuration."
+        )
     return path
 
 @mcp.tool()
@@ -359,14 +368,16 @@ def create_directory(path: str, parents: bool = True) -> str:
         Success or error message
     """
     try:
-        safe_path = safe_path_join(path)
+        # Expand user home directory (~) if present
+        expanded_path = os.path.expanduser(path)
+        safe_path = safe_path_join(expanded_path)
         
         if os.path.exists(safe_path):
-            return f"Directory already exists: {path}"
+            return f"Directory already exists: {safe_path}"
         
         os.makedirs(safe_path, exist_ok=parents)
         
-        return f"Successfully created directory: {path}"
+        return f"Successfully created directory: {safe_path}"
     
     except PermissionError as e:
         return f"Error: {str(e)}"
