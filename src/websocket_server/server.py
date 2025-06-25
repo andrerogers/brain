@@ -4,9 +4,9 @@ import asyncio
 import websockets
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
-from mcp_brain import MCPClient
+from mcp_brain.mcp_client import MCPClient
 
 
 class WSSettings:
@@ -110,6 +110,8 @@ class WebSocketServer:
             await self.handle_query(websocket, data)
         elif command == "get_servers":
             await self.handle_get_servers(websocket, data)
+        elif command == "get_all_tools":
+            await self.handle_get_all_tools(websocket, data)
         else:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -219,12 +221,20 @@ class WebSocketServer:
             return
 
         try:
+            async def progress_callback(progress_data):
+                await websocket.send(json.dumps({
+                    "type": "thinking",
+                    "message": self._format_progress_message(progress_data),
+                    "metrics": progress_data
+                }))
+
             await websocket.send(json.dumps({
                 "type": "thinking",
-                "message": "Processing query..."
+                "message": "Starting query processing...",
+                "metrics": {"elapsed_time": 0, "estimated_input_tokens": 0, "tool_calls_completed": 0, "total_tool_calls": 0}
             }))
 
-            response = await self.mcp_client.process_query(query)
+            response = await self.mcp_client.process_query(query, progress_callback)
 
             self.logger.debug(f"Query response: {response}")
 
@@ -240,6 +250,43 @@ class WebSocketServer:
                 "error": str(e)
             }))
 
+    def _format_progress_message(self, progress_data: Dict[str, Any]) -> str:
+        """Format progress data into a human-readable message"""
+        elapsed = progress_data.get("elapsed_time", 0)
+        status = progress_data.get("status", "thinking")
+        tokens = progress_data.get("estimated_input_tokens", 0)
+        completed_calls = progress_data.get("tool_calls_completed", 0)
+        total_calls = progress_data.get("total_tool_calls", 0)
+
+        if elapsed < 1:
+            time_str = f"{elapsed*1000:.0f}ms"
+        else:
+            time_str = f"{elapsed:.1f}s"
+
+        if status.startswith("executing_tool_"):
+            tool_name = status.replace("executing_tool_", "")
+            status_msg = f"executing {tool_name}"
+        elif status == "processing_tool_result":
+            status_msg = "processing result"
+        elif status == "analyzing_query":
+            status_msg = "analyzing"
+        elif status == "preparing_tools":
+            status_msg = "preparing tools"
+        elif status == "processing_llm":
+            status_msg = "processing"
+        else:
+            status_msg = status
+
+        parts = [f"{status_msg} ({time_str})"]
+
+        if tokens > 0:
+            parts.append(f"{tokens} tokens")
+
+        if total_calls > 0:
+            parts.append(f"tools: {completed_calls}/{total_calls}")
+
+        return " • ".join(parts)
+
     async def handle_get_servers(self, websocket, data):
         try:
             servers_info = await self.mcp_client.get_all_servers()
@@ -250,6 +297,21 @@ class WebSocketServer:
             }))
         except Exception as e:
             self.logger.error(f"Error getting servers: {e}")
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error": str(e)
+            }))
+
+    async def handle_get_all_tools(self, websocket, data):
+        try:
+            tools_by_server = await self.mcp_client.get_all_available_tools()
+
+            await websocket.send(json.dumps({
+                "type": "tools_overview",
+                "tools": tools_by_server
+            }))
+        except Exception as e:
+            self.logger.error(f"Error getting all tools: {e}")
             await websocket.send(json.dumps({
                 "type": "error",
                 "error": str(e)
@@ -292,11 +354,18 @@ class WebSocketServer:
             print(traceback.format_exc())
 
     async def start(self):
+        self.logger.info("Auto-connecting to built-in development servers...")
+
+        builtin_results = await self.mcp_client.auto_connect_builtin_servers()
+        connected_builtin = sum(1 for success in builtin_results.values() if success)
+
+        self.logger.info(f"Connected to {connected_builtin}/{len(builtin_results)} built-in servers")
+
         mcp_settings = self.load_mcp_settings()
         servers = mcp_settings.get("servers", [])
 
         if servers:
-            self.logger.info(f"Connecting to {len(servers)} configured MCP servers")
+            self.logger.info(f"Connecting to {len(servers)} user-configured MCP servers")
 
             for server in servers:
                 server_id = server.get("id")
@@ -317,6 +386,12 @@ class WebSocketServer:
                     except Exception as e:
                         self.logger.error(
                             f"Error connecting to server {server_id}: {e}")
+
+        all_servers = await self.mcp_client.get_all_servers()
+        self.logger.info("Brain initialization complete:")
+        self.logger.info(f"  - Total MCP servers connected: {len(all_servers)}")
+        for server_id, server_info in all_servers.items():
+            self.logger.info(f"    • {server_id}: {server_info['tools_count']} tools available")
 
         self.logger.info(f"Starting websocket server at ws://{self.host}:{self.port}")
         server = await websockets.serve(self.websocket_handler, self.host, self.port)
