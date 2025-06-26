@@ -286,18 +286,6 @@ class CustomEngine(BaseEngine):
 
 Built-in servers follow the MCP specification. See `src/mcp_brain/servers/` for examples.
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Run code quality tools
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 🐛 Troubleshooting
 
 ### Common Issues

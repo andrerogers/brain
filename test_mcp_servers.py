@@ -14,7 +14,7 @@ from pathlib import Path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
-from mcp_brain.mcp_client import MCPClient
+from tools.client import MCPClient
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_filesystem_server():
     client = MCPClient()
     
     # Connect to filesystem server
-    filesystem_path = src_path / "mcp_brain" / "servers" / "filesystem_server.py"
+    filesystem_path = src_path / "tools" / "servers" / "filesystem_server.py"
     success = await client.connect_server("filesystem", str(filesystem_path))
     
     if not success:
@@ -80,7 +80,7 @@ async def test_git_server():
     client = MCPClient()
     
     # Connect to git server
-    git_path = src_path / "mcp_brain" / "servers" / "git_server.py"
+    git_path = src_path / "tools" / "servers" / "git_server.py"
     success = await client.connect_server("git", str(git_path))
     
     if not success:
@@ -130,7 +130,7 @@ async def test_codebase_server():
     client = MCPClient()
     
     # Connect to codebase server
-    codebase_path = src_path / "mcp_brain" / "servers" / "codebase_server.py"
+    codebase_path = src_path / "tools" / "servers" / "codebase_server.py"
     success = await client.connect_server("codebase", str(codebase_path))
     
     if not success:
@@ -181,7 +181,7 @@ async def test_exa_server():
     client = MCPClient()
     
     # Connect to exa server
-    exa_path = src_path / "mcp_brain" / "servers" / "exa_server.py"
+    exa_path = src_path / "tools" / "servers" / "exa_server.py"
     
     try:
         success = await client.connect_server("exa", str(exa_path))
