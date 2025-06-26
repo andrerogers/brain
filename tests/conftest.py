@@ -15,7 +15,7 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-from mcp_brain.mcp_client import MCPClient
+from tools.client import MCPClient
 
 
 @pytest.fixture(scope="session")
@@ -128,7 +128,7 @@ def sample_project_structure(temp_dir):
 def server_paths():
     """Get paths to all MCP servers"""
     src_path = Path(__file__).parent.parent / "src"
-    servers_path = src_path / "mcp_brain" / "servers"
+    servers_path = src_path / "tools" / "servers"
     
     return {
         "filesystem": str(servers_path / "filesystem_server.py"),

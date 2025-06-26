@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from config import get_settings
-from websocket_server import WSSettings, WebSocketServer
+from server import WSSettings, BrainServer
 from dependencies import get_engine
 
 
@@ -35,10 +35,10 @@ async def main():
     validate_paths()
 
     settings = get_settings()
-    
+
     # Set logging level based on debug setting
     log_level = logging.DEBUG if settings.debug else logging.INFO
-    
+
     logging.basicConfig(
         filename=LOG_FILE,
         level=log_level,
@@ -62,7 +62,7 @@ async def main():
         debug=getattr(settings, "debug", False)
     )
 
-    server = WebSocketServer(logger, settings, ws_settings, engine)
+    server = BrainServer(logger, settings, ws_settings, engine)
 
     try:
         await server.listen()  # This now handles its own shutdown
