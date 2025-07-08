@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
+
 from pydantic import BaseModel, Field, validator
 
 from .models import AgentType, ToolCall
@@ -16,6 +17,7 @@ from .models import AgentType, ToolCall
 
 class TaskStatus(str, Enum):
     """Status of a task in the execution pipeline."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -26,6 +28,7 @@ class TaskStatus(str, Enum):
 
 class TaskPriority(int, Enum):
     """Priority levels for task execution."""
+
     LOW = 1
     MEDIUM = 2
     HIGH = 3
@@ -34,17 +37,21 @@ class TaskPriority(int, Enum):
 
 class Task(BaseModel):
     """Individual task within a reasoning chain."""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str = Field(description="Short title for the task")
     description: str = Field(description="Human-readable task description")
     status: TaskStatus = TaskStatus.PENDING
     priority: TaskPriority = TaskPriority.MEDIUM
     dependencies: List[str] = Field(
-        default_factory=list, description="Task IDs that must complete before this task")
+        default_factory=list, description="Task IDs that must complete before this task"
+    )
     assigned_agent: Optional[AgentType] = None
 
     # Execution details
     tools_required: List[str] = Field(
-        default_factory=list, description="Tools needed for execution")
+        default_factory=list, description="Tools needed for execution"
+    )
     estimated_duration_seconds: Optional[int] = None
     actual_duration_seconds: Optional[float] = None
 
@@ -61,8 +68,8 @@ class Task(BaseModel):
     max_retries: int = 3
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    @validator('dependencies')
-    def validate_dependencies(cls, v):
+    @validator("dependencies")
+    def validate_dependencies(cls, v: List[str]) -> List[str]:
         """Ensure dependencies don't include self-references."""
         return list(set(v))  # Remove duplicates
 
@@ -78,7 +85,8 @@ class Task(BaseModel):
         self.result = result
         if self.started_at:
             self.actual_duration_seconds = (
-                self.completed_at - self.started_at).total_seconds()
+                self.completed_at - self.started_at
+            ).total_seconds()
 
     def fail_execution(self, error: str) -> None:
         """Mark task as failed with error."""
@@ -87,7 +95,8 @@ class Task(BaseModel):
         self.error = error
         if self.started_at:
             self.actual_duration_seconds = (
-                self.completed_at - self.started_at).total_seconds()
+                self.completed_at - self.started_at
+            ).total_seconds()
 
     def can_execute(self, completed_task_ids: Set[str]) -> bool:
         """Check if task can be executed based on dependencies."""
@@ -101,11 +110,13 @@ class Task(BaseModel):
 
 class TaskList(BaseModel):
     """Collection of tasks with execution ordering."""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(description="Name of the task list")
     tasks: List[Task] = Field(default_factory=list)
     execution_order: List[str] = Field(
-        default_factory=list, description="Ordered list of task IDs")
+        default_factory=list, description="Ordered list of task IDs"
+    )
 
     # Status tracking
     status: TaskStatus = TaskStatus.PENDING
@@ -132,15 +143,16 @@ class TaskList(BaseModel):
     def get_ready_tasks(self) -> List[Task]:
         """Get tasks that are ready to execute."""
         return [
-            task for task in self.tasks
-            if task.can_execute(self.completed_task_ids)
+            task for task in self.tasks if task.can_execute(self.completed_task_ids)
         ]
 
     def get_blocked_tasks(self) -> List[Task]:
         """Get tasks that are blocked by dependencies."""
         return [
-            task for task in self.tasks
-            if task.status == TaskStatus.PENDING and not task.can_execute(self.completed_task_ids)
+            task
+            for task in self.tasks
+            if task.status == TaskStatus.PENDING
+            and not task.can_execute(self.completed_task_ids)
         ]
 
     def mark_task_completed(self, task_id: str) -> None:
@@ -176,7 +188,9 @@ class TaskList(BaseModel):
 
 class ReasoningStep(BaseModel):
     """Individual step in a reasoning chain."""
+
     step_number: int
+    title: str = Field(description="Short title for the reasoning step")
     agent_type: AgentType
     description: str
     input_data: Dict[str, Any] = Field(default_factory=dict)
@@ -184,11 +198,13 @@ class ReasoningStep(BaseModel):
     status: TaskStatus = TaskStatus.PENDING
     execution_time_seconds: Optional[float] = None
     error: Optional[str] = None
+    tool_calls: List[ToolCall] = Field(default_factory=list, description="Tool calls made during this step")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ReasoningChain(BaseModel):
     """Complete reasoning chain for multi-agent query processing."""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     original_query: str = Field(description="Original user query")
     task_list: TaskList
@@ -230,7 +246,8 @@ class ReasoningChain(BaseModel):
 
         if self.started_at:
             self.total_execution_time_seconds = (
-                self.completed_at - self.started_at).total_seconds()
+                self.completed_at - self.started_at
+            ).total_seconds()
 
     def fail_chain(self, error: str) -> None:
         """Fail the reasoning chain with error."""
@@ -273,7 +290,7 @@ class ReasoningChain(BaseModel):
             "completed_tasks": len(self.task_list.completed_task_ids),
             "total_tasks": len(self.task_list.tasks),
             "execution_time_seconds": self.total_execution_time_seconds,
-            "has_failures": self.task_list.has_failures()
+            "has_failures": self.task_list.has_failures(),
         }
 
     class Config:

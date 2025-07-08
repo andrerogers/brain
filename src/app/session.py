@@ -1,22 +1,14 @@
-"""
-Session Management for Application Layer
-
-Provides session lifecycle management, persistence, and coordination
-for user interactions and multi-agent workflows.
-"""
-
-import asyncio
 import json
 import logging
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 from agent.models import ProgressUpdate
 from agent.tasks import ReasoningChain
 
-from .models import AppSession, SessionStatus, AppProgress
+from .models import AppProgress, AppSession, SessionStatus
 
 
 class SessionManager:
@@ -25,10 +17,12 @@ class SessionManager:
     and cleanup of user interaction sessions.
     """
 
-    def __init__(self,
-                 storage_path: Optional[Path] = None,
-                 session_timeout_hours: int = 24,
-                 logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        storage_path: Optional[Path] = None,
+        session_timeout_hours: int = 24,
+        logger: Optional[logging.Logger] = None,
+    ):
         self.logger = logger or logging.getLogger("SessionManager")
         self.session_timeout_hours = session_timeout_hours
 
@@ -44,10 +38,10 @@ class SessionManager:
             "total_created": 0,
             "total_completed": 0,
             "total_failed": 0,
-            "active_count": 0
+            "active_count": 0,
         }
 
-    async def create_session(self, initial_context: Dict[str, Any] = None) -> AppSession:
+    async def create_session(self, initial_context: Dict[str, Any]) -> AppSession:
         """
         Create a new application session.
 
@@ -62,7 +56,7 @@ class SessionManager:
         session = AppSession(
             session_id=session_id,
             status=SessionStatus.READY,
-            metadata=initial_context or {}
+            metadata=initial_context or {},
         )
 
         # Store in memory
@@ -105,9 +99,9 @@ class SessionManager:
 
         return None
 
-    async def update_session_progress(self,
-                                      session_id: str,
-                                      progress_update: ProgressUpdate) -> bool:
+    async def update_session_progress(
+        self, session_id: str, progress_update: ProgressUpdate
+    ) -> bool:
         """
         Update session progress with agent progress information.
 
@@ -128,14 +122,15 @@ class SessionManager:
         # Persist changes
         await self._persist_session(session)
 
-        self.logger.debug(f"Updated progress for session {session_id}: {
-                          progress_update.progress_percentage}%")
+        self.logger.debug(
+            f"Updated progress for session {session_id}: {
+                          progress_update.progress_percentage}%"
+        )
         return True
 
-    async def complete_session(self,
-                               session_id: str,
-                               result: str,
-                               reasoning_chain: ReasoningChain) -> bool:
+    async def complete_session(
+        self, session_id: str, result: str, reasoning_chain: ReasoningChain
+    ) -> bool:
         """
         Mark a session as completed with results.
 
@@ -162,8 +157,10 @@ class SessionManager:
         if session_id in self._active_sessions:
             self._session_metrics["active_count"] -= 1
 
-        self.logger.info(f"Completed session {
-                         session_id} with result length: {len(result)}")
+        self.logger.info(
+            f"Completed session {
+                         session_id} with result length: {len(result)}"
+        )
         return True
 
     async def fail_session(self, session_id: str, error: str) -> bool:
@@ -234,9 +231,9 @@ class SessionManager:
 
         return list(self._active_sessions.values())
 
-    async def get_session_history(self,
-                                  limit: int = 50,
-                                  status_filter: Optional[SessionStatus] = None) -> List[AppSession]:
+    async def get_session_history(
+        self, limit: int = 50, status_filter: Optional[SessionStatus] = None
+    ) -> List[AppSession]:
         """
         Get session history from disk storage.
 
@@ -255,7 +252,7 @@ class SessionManager:
             session_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
             # Get more to account for filtering
-            for session_file in session_files[:limit * 2]:
+            for session_file in session_files[: limit * 2]:
                 try:
                     session = await self._load_session_from_file(session_file)
                     if session:
@@ -264,8 +261,10 @@ class SessionManager:
                             if len(sessions) >= limit:
                                 break
                 except Exception as e:
-                    self.logger.warning(f"Failed to load session from {
-                                        session_file}: {e}")
+                    self.logger.warning(
+                        f"Failed to load session from {
+                                        session_file}: {e}"
+                    )
 
         except Exception as e:
             self.logger.error(f"Failed to get session history: {e}")
@@ -295,8 +294,10 @@ class SessionManager:
                 self.logger.info(f"Deleted session {session_id}")
                 return True
             except Exception as e:
-                self.logger.error(f"Failed to delete session file {
-                                  session_file}: {e}")
+                self.logger.error(
+                    f"Failed to delete session file {
+                                  session_file}: {e}"
+                )
 
         return False
 
@@ -319,16 +320,17 @@ class SessionManager:
             for session_file in session_files:
                 try:
                     # Check file modification time
-                    file_time = datetime.utcfromtimestamp(
-                        session_file.stat().st_mtime)
+                    file_time = datetime.utcfromtimestamp(session_file.stat().st_mtime)
 
                     if file_time < cutoff_date:
                         session_file.unlink()
                         cleaned_count += 1
 
                 except Exception as e:
-                    self.logger.warning(f"Failed to process session file {
-                                        session_file}: {e}")
+                    self.logger.warning(
+                        f"Failed to process session file {
+                                        session_file}: {e}"
+                    )
 
         except Exception as e:
             self.logger.error(f"Failed to cleanup old sessions: {e}")
@@ -343,7 +345,7 @@ class SessionManager:
         return {
             **self._session_metrics,
             "storage_path": str(self.storage_path),
-            "session_timeout_hours": self.session_timeout_hours
+            "session_timeout_hours": self.session_timeout_hours,
         }
 
     async def _persist_session(self, session: AppSession) -> None:
@@ -351,11 +353,13 @@ class SessionManager:
         session_file = self.storage_path / f"{session.session_id}.json"
 
         try:
-            with open(session_file, 'w') as f:
+            with open(session_file, "w") as f:
                 json.dump(session.model_dump(), f, indent=2, default=str)
         except Exception as e:
-            self.logger.error(f"Failed to persist session {
-                              session.session_id}: {e}")
+            self.logger.error(
+                f"Failed to persist session {
+                              session.session_id}: {e}"
+            )
 
     async def _load_session(self, session_id: str) -> Optional[AppSession]:
         """Load a session from disk."""
@@ -368,20 +372,23 @@ class SessionManager:
             return None
 
         try:
-            with open(session_file, 'r') as f:
+            with open(session_file, "r") as f:
                 session_data = json.load(f)
 
             # Convert datetime strings back to datetime objects
-            for field in ['created_at', 'started_at', 'completed_at']:
+            for field in ["created_at", "started_at", "completed_at"]:
                 if session_data.get(field):
                     session_data[field] = datetime.fromisoformat(
-                        session_data[field].replace('Z', '+00:00'))
+                        session_data[field].replace("Z", "+00:00")
+                    )
 
             return AppSession(**session_data)
 
         except Exception as e:
-            self.logger.error(f"Failed to load session from {
-                              session_file}: {e}")
+            self.logger.error(
+                f"Failed to load session from {
+                              session_file}: {e}"
+            )
             return None
 
     def _is_session_expired(self, session: AppSession) -> bool:
@@ -389,8 +396,7 @@ class SessionManager:
         if not session.created_at:
             return False
 
-        expiry_time = session.created_at + \
-            timedelta(hours=self.session_timeout_hours)
+        expiry_time = session.created_at + timedelta(hours=self.session_timeout_hours)
         return datetime.utcnow() > expiry_time
 
     async def _cleanup_session(self, session_id: str) -> None:
@@ -411,8 +417,7 @@ class SessionManager:
             await self._cleanup_session(session_id)
 
         if expired_sessions:
-            self.logger.info(
-                f"Cleaned up {len(expired_sessions)} expired sessions")
+            self.logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
 
 
 class SessionProgressTracker:
@@ -420,17 +425,18 @@ class SessionProgressTracker:
     Tracks and aggregates progress updates for sessions.
     """
 
-    def __init__(self, session_manager: SessionManager, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self, session_manager: SessionManager, logger: Optional[logging.Logger] = None
+    ):
         self.session_manager = session_manager
         self.logger = logger or logging.getLogger("SessionProgressTracker")
 
         # Progress callbacks by session
-        self._progress_callbacks: Dict[str,
-                                       List[Callable[[AppProgress], None]]] = {}
+        self._progress_callbacks: Dict[str, List[Callable[[AppProgress], None]]] = {}
 
-    def register_progress_callback(self,
-                                   session_id: str,
-                                   callback: Callable[[AppProgress], None]) -> None:
+    def register_progress_callback(
+        self, session_id: str, callback: Callable[[AppProgress], None]
+    ) -> None:
         """
         Register a progress callback for a session.
 
@@ -442,12 +448,11 @@ class SessionProgressTracker:
             self._progress_callbacks[session_id] = []
 
         self._progress_callbacks[session_id].append(callback)
-        self.logger.debug(
-            f"Registered progress callback for session {session_id}")
+        self.logger.debug(f"Registered progress callback for session {session_id}")
 
-    def unregister_progress_callback(self,
-                                     session_id: str,
-                                     callback: Callable[[AppProgress], None]) -> None:
+    def unregister_progress_callback(
+        self, session_id: str, callback: Callable[[AppProgress], None]
+    ) -> None:
         """
         Unregister a progress callback for a session.
 
@@ -461,13 +466,14 @@ class SessionProgressTracker:
                 if not self._progress_callbacks[session_id]:
                     del self._progress_callbacks[session_id]
                 self.logger.debug(
-                    f"Unregistered progress callback for session {session_id}")
+                    f"Unregistered progress callback for session {session_id}"
+                )
             except ValueError:
                 pass
 
-    async def update_session_progress(self,
-                                      session_id: str,
-                                      agent_progress: ProgressUpdate) -> None:
+    async def update_session_progress(
+        self, session_id: str, agent_progress: ProgressUpdate
+    ) -> None:
         """
         Update session progress and notify callbacks.
 
@@ -476,7 +482,9 @@ class SessionProgressTracker:
             agent_progress: Progress update from agent
         """
         # Update session in manager
-        updated = await self.session_manager.update_session_progress(session_id, agent_progress)
+        updated = await self.session_manager.update_session_progress(
+            session_id, agent_progress
+        )
 
         if updated and session_id in self._progress_callbacks:
             # Get updated session
@@ -490,7 +498,7 @@ class SessionProgressTracker:
                     current_step=agent_progress.current_task,
                     agent_progress=agent_progress,
                     elapsed_time_seconds=agent_progress.elapsed_time_seconds,
-                    details=agent_progress.details
+                    details=agent_progress.details,
                 )
 
                 # Notify all callbacks
@@ -498,8 +506,10 @@ class SessionProgressTracker:
                     try:
                         callback(app_progress)
                     except Exception as e:
-                        self.logger.error(f"Progress callback failed for session {
-                                          session_id}: {e}")
+                        self.logger.error(
+                            f"Progress callback failed for session {
+                                          session_id}: {e}"
+                        )
 
     def cleanup_session_callbacks(self, session_id: str) -> None:
         """
@@ -510,5 +520,4 @@ class SessionProgressTracker:
         """
         if session_id in self._progress_callbacks:
             del self._progress_callbacks[session_id]
-            self.logger.debug(
-                f"Cleaned up progress callbacks for session {session_id}")
+            self.logger.debug(f"Cleaned up progress callbacks for session {session_id}")

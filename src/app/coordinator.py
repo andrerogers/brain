@@ -1,17 +1,19 @@
 import logging
 import time
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agent.engine import AgentEngine
 from agent.models import ProgressUpdate
 from agent.tasks import ReasoningChain
 from tools.client import MCPClient
 
-from .tool_bridge import ToolBridge
 from .models import (
-    ToolExecutionRequest, ToolExecutionResponse,
-    QueryComplexityAnalysis, SystemHealthStatus
+    QueryComplexityAnalysis,
+    SystemHealthStatus,
+    ToolExecutionRequest,
+    ToolExecutionResponse,
 )
+from .tool_bridge import ToolBridge
 
 
 class AppCoordinator:
@@ -22,10 +24,12 @@ class AppCoordinator:
     management while maintaining clean separation of concerns.
     """
 
-    def __init__(self,
-                 agent_engine: AgentEngine,
-                 tool_client: MCPClient,
-                 logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        agent_engine: AgentEngine,
+        tool_client: MCPClient,
+        logger: Optional[logging.Logger] = None,
+    ):
         self.agent_engine = agent_engine
         self.tool_client = tool_client
         self.logger = logger or logging.getLogger("AppCoordinator")
@@ -40,7 +44,7 @@ class AppCoordinator:
             "queries_processed": 0,
             "tools_executed": 0,
             "average_query_time": 0.0,
-            "success_rate": 1.0
+            "success_rate": 1.0,
         }
 
     async def initialize(self) -> None:
@@ -49,11 +53,9 @@ class AppCoordinator:
             return
 
         self.logger.info("Initializing application coordinator...")
-
-        # Initialize tool bridge (cache tools)
         await self.tool_bridge.get_available_tools(refresh_cache=True)
 
-        # Inject tool bridge into agent engine and initialize
+        # this should be in the constructor of AgentEngine
         self.agent_engine.set_tool_bridge(self.tool_bridge)
         await self.agent_engine.initialize()
 
@@ -64,10 +66,12 @@ class AppCoordinator:
         """Check if the coordinator is initialized."""
         return self._initialized
 
-    async def process_query(self,
-                            user_query: str,
-                            context: Dict[str, Any] = None,
-                            progress_callback: Optional[Callable[[ProgressUpdate], None]] = None) -> ReasoningChain:
+    async def process_query(
+        self,
+        user_query: str,
+        context: Dict[str, Any],
+        progress_callback: Callable[[ProgressUpdate], Awaitable[None]],
+    ) -> ReasoningChain:
         """
         Process a user query through the agent engine with tool integration.
 
@@ -88,21 +92,21 @@ class AppCoordinator:
         self.logger.info(f"Processing query: {user_query}")
 
         try:
-            # Set current workflow
             reasoning_chain = await self.agent_engine.process_query(
                 user_query=user_query,
                 context=context,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             self._current_workflow_id = reasoning_chain.id
 
-            # Update metrics
             execution_time = time.time() - start_time
             self._update_metrics(success=True, execution_time=execution_time)
 
-            self.logger.info(f"Query processed successfully in {
-                             execution_time:.2f}s")
+            self.logger.info(
+                f"Query processed successfully in {
+                             execution_time:.2f}s"
+            )
             return reasoning_chain
 
         except Exception as e:
@@ -113,7 +117,9 @@ class AppCoordinator:
         finally:
             self._current_workflow_id = None
 
-    async def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResponse:
+    async def execute_tool(
+        self, request: ToolExecutionRequest
+    ) -> ToolExecutionResponse:
         """
         Execute a single tool directly through the tool bridge.
 
@@ -130,8 +136,6 @@ class AppCoordinator:
 
         try:
             response = await self.tool_bridge.execute_tool_request(request)
-
-            # Update metrics
             self._system_metrics["tools_executed"] += 1
 
             return response
@@ -140,7 +144,9 @@ class AppCoordinator:
             self.logger.error(f"Direct tool execution failed: {e}")
             raise
 
-    async def analyze_query_complexity(self, user_query: str) -> QueryComplexityAnalysis:
+    async def analyze_query_complexity(
+        self, user_query: str
+    ) -> QueryComplexityAnalysis:
         """
         Analyze the complexity of a user query.
 
@@ -156,27 +162,31 @@ class AppCoordinator:
         self.logger.info(f"Analyzing query complexity: {user_query}")
 
         try:
-            # Use agent engine for complexity analysis
-            analysis_result = await self.agent_engine.analyze_query_complexity(user_query)
+            analysis_result = await self.agent_engine.analyze_query_complexity(
+                user_query
+            )
 
-            # Convert to application-level analysis
             return QueryComplexityAnalysis(
                 query=user_query,
                 complexity_level=analysis_result.get("complexity", "moderate"),
                 estimated_steps=analysis_result.get("estimated_steps", 3),
                 estimated_duration_seconds=analysis_result.get(
-                    "estimated_duration", 30),
+                    "estimated_duration", 30
+                ),
                 required_capabilities=analysis_result.get("capabilities", []),
                 recommended_approach=analysis_result.get(
-                    "approach", "multi-agent workflow"),
-                confidence_score=analysis_result.get("confidence", 0.8)
+                    "approach", "multi-agent workflow"
+                ),
+                confidence_score=analysis_result.get("confidence", 0.8),
             )
 
         except Exception as e:
             self.logger.error(f"Complexity analysis failed: {e}")
             raise
 
-    async def get_available_tools(self, server_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_available_tools(
+        self, server_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get available tools, optionally filtered by server type.
 
@@ -202,7 +212,7 @@ class AppCoordinator:
                     "server_id": tool.server_id,
                     "description": tool.description,
                     "parameters": tool.parameters,
-                    "server_type": tool.server_type
+                    "server_type": tool.server_type,
                 }
                 for tool in tools
             ]
@@ -244,7 +254,8 @@ class AppCoordinator:
             issues = []
             if connected_servers < total_servers:
                 issues.append(
-                    f"{total_servers - connected_servers} servers disconnected")
+                    f"{total_servers - connected_servers} servers disconnected"
+                )
             if not agent_healthy:
                 issues.append("Agent engine not healthy")
 
@@ -253,13 +264,13 @@ class AppCoordinator:
                 components={
                     "agent_engine": "healthy" if agent_healthy else "unhealthy",
                     "tool_servers": f"{connected_servers}/{total_servers}",
-                    "tool_bridge": "healthy"
+                    "tool_bridge": "healthy",
                 },
                 active_sessions_count=0,  # This would be managed by session manager
                 tool_servers_connected=connected_servers,
                 total_tool_servers=total_servers,
                 agent_engine_status=agent_status.get("status", "unknown"),
-                issues=issues
+                issues=issues,
             )
 
         except Exception as e:
@@ -270,7 +281,7 @@ class AppCoordinator:
                 active_sessions_count=0,
                 tool_servers_connected=0,
                 total_tool_servers=0,
-                agent_engine_status="error"
+                agent_engine_status="error",
             )
 
     async def cancel_current_workflow(self) -> bool:
@@ -302,27 +313,27 @@ class AppCoordinator:
         current_avg = self._system_metrics["average_query_time"]
         query_count = self._system_metrics["queries_processed"]
         self._system_metrics["average_query_time"] = (
-            (current_avg * (query_count - 1) + execution_time) / query_count
-        )
+            current_avg * (query_count - 1) + execution_time
+        ) / query_count
 
         # Update success rate
         if success:
             current_success_rate = self._system_metrics["success_rate"]
             self._system_metrics["success_rate"] = (
-                (current_success_rate * (query_count - 1) + 1.0) / query_count
-            )
+                current_success_rate * (query_count - 1) + 1.0
+            ) / query_count
         else:
             current_success_rate = self._system_metrics["success_rate"]
             self._system_metrics["success_rate"] = (
-                (current_success_rate * (query_count - 1) + 0.0) / query_count
-            )
+                current_success_rate * (query_count - 1) + 0.0
+            ) / query_count
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get current system metrics."""
         return {
             **self._system_metrics,
             "initialized": self._initialized,
-            "current_workflow_active": self._current_workflow_id is not None
+            "current_workflow_active": self._current_workflow_id is not None,
         }
 
     async def get_agents_status(self) -> List[Dict[str, Any]]:
@@ -343,7 +354,9 @@ class AppCoordinator:
             return None
 
         try:
-            workflow_status = await self.agent_engine.get_workflow_status(self._current_workflow_id)
+            workflow_status = await self.agent_engine.get_workflow_status(
+                self._current_workflow_id
+            )
             return workflow_status
         except Exception as e:
             self.logger.error(f"Failed to get workflow status: {e}")
@@ -355,7 +368,9 @@ class AppCoordinator:
             return []
 
         try:
-            tasks_status = await self.agent_engine.get_tasks_status(self._current_workflow_id)
+            tasks_status = await self.agent_engine.get_tasks_status(
+                self._current_workflow_id
+            )
             return tasks_status
         except Exception as e:
             self.logger.error(f"Failed to get tasks status: {e}")
@@ -367,7 +382,9 @@ class AppCoordinator:
             return []
 
         try:
-            reasoning_chain = await self.agent_engine.get_reasoning_chain(self._current_workflow_id)
+            reasoning_chain = await self.agent_engine.get_reasoning_chain(
+                self._current_workflow_id
+            )
             return reasoning_chain
         except Exception as e:
             self.logger.error(f"Failed to get reasoning chain: {e}")
@@ -400,7 +417,7 @@ class AppCoordinator:
             await self.cancel_current_workflow()
 
         # Shutdown agent engine
-        if hasattr(self.agent_engine, 'shutdown'):
+        if hasattr(self.agent_engine, "shutdown"):
             await self.agent_engine.shutdown()
 
         self._initialized = False

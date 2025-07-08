@@ -1,16 +1,19 @@
 import json
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
+import logfire
 from pydantic import BaseModel, Field
+from pydantic_ai import Agent
 
-from .base_agent import BaseAgent
-from ..tasks import Task, TaskList
 from ..models import AgentConfig, AgentResult, AgentType
+from ..tasks import Task, TaskList
+from .base_agent import BaseAgent
 
 
 class ToolExecutionStep(BaseModel):
     """Individual step in a tool execution plan."""
+
     step_number: int
     tool_name: str
     server_id: str
@@ -23,18 +26,26 @@ class ToolExecutionStep(BaseModel):
 
 class ToolExecutionPlan(BaseModel):
     """Complete tool execution plan for a task."""
+
     task_id: str
     task_description: str
     approach: str = Field(description="High-level approach for tool execution")
     execution_steps: List[ToolExecutionStep] = Field(
-        description="Ordered list of tool execution steps")
+        description="Ordered list of tool execution steps"
+    )
     fallback_strategy: str = Field(
-        description="Fallback approach if primary plan fails")
+        description="Fallback approach if primary plan fails"
+    )
     estimated_duration_seconds: int = Field(
-        description="Estimated total execution time")
+        description="Estimated total execution time"
+    )
     risk_assessment: str = Field(description="Assessment of execution risks")
     success_criteria: str = Field(
-        description="How to determine if execution was successful")
+        description="How to determine if execution was successful"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata about the execution plan"
+    )
 
 
 class OrchestratorAgent(BaseAgent):
@@ -50,14 +61,13 @@ class OrchestratorAgent(BaseAgent):
     - Plan error handling and fallback strategies
     """
 
-    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger = None):
+    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger):
         super().__init__(config, tool_bridge, logger)
 
-        # Override agent with structured output
-        self.agent = self.agent.__class__(
+        self.agent = Agent(
             model=config.model,
             system_prompt=config.system_prompt or self.get_default_system_prompt(),
-            output_type=ToolExecutionPlan
+            output_type=ToolExecutionPlan,
         )
 
     def get_default_system_prompt(self) -> str:
@@ -84,32 +94,35 @@ Key principles:
 CRITICAL: Tool Parameter Requirements
 When designing tool execution plans, you must specify ALL required parameters for each tool:
 
-FILESYSTEM SERVER (8 tools):
+filesystem (8 tools):
 - write_file: requires 'path' AND 'content' parameters
 - read_file: requires 'path' parameter
 - edit_file: requires 'path', 'old_text', and 'new_text' parameters
 - delete_file: requires 'path' parameter
-- list_files: requires 'path' parameter
+- list_directory: requires 'path' parameter
 - create_directory: requires 'path' parameter
 - get_file_info: requires 'path' parameter
-- search_files: requires 'query' and 'path' parameters
+- search_files: requires 'pattern' and 'directory' parameters
 
-GIT SERVER (11 tools):
+git (11 tools):
 - git_commit: requires 'message' parameter
-- git_branch: may require 'branch_name' for creation
-- git_checkout: requires 'branch' or 'file' parameter
-- Most other git tools require no parameters but check context
+- git_branch_info: no parameters required
+- git_status: requires 'path' parameter
+- git_diff: may require 'file_path' parameter
+- Most other git tools require 'path' parameter for repository location
 
-CODEBASE SERVER (6 tools):
-- find_definitions: requires 'symbol' parameter
+codebase (6 tools):
+- find_definition: requires 'symbol' parameter
 - find_references: requires 'symbol' parameter
-- explain_code_context: requires 'file_path' parameter
+- analyze_project: requires 'path' parameter
+- get_project_structure: requires 'path' parameter
 
-DEVTOOLS SERVER (6 tools):
-- run_command: requires 'command' parameter
-- Most testing tools work without parameters
+devtools (6 tools):
+- run_command_safe: requires 'command' parameter
+- run_tests: may require 'pattern' parameter
+- Most testing tools work with 'path' parameter
 
-EXA SERVER (2 tools):
+exa (2 tools):
 - web_search_exa: requires 'query' parameter
 - crawl_url: requires 'url' parameter
 
@@ -120,10 +133,15 @@ Tool Usage Rules:
 4. For file operations, use appropriate file paths
 5. For commands, specify complete command strings
 6. For searches, provide meaningful query terms
+7. CRITICAL: Use exact server IDs as listed above (lowercase: filesystem, git, codebase, devtools, exa, context7)
 
 Design comprehensive tool execution plans that achieve task objectives efficiently with COMPLETE parameter specifications."""
 
-    async def process_request(self, request: Union[str, Dict[str, Any]], context: Dict[str, Any] = None) -> AgentResult:
+    async def process_request(
+        self,
+        request: Union[str, Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> AgentResult:
         """
         Process an orchestration request for a task or task list.
 
@@ -146,11 +164,13 @@ Design comprehensive tool execution plans that achieve task objectives efficient
                     task_list = request["task_list"]
                     return await self._orchestrate_task_list(task_list, context or {})
                 else:
-                    raise ValueError(
-                        "Request must contain 'task' or 'task_list'")
+                    raise ValueError("Request must contain 'task' or 'task_list'")
             else:
-                # Treat as task description
-                task = Task(description=str(request))
+                # TODO
+                # fix the title
+                task = Task(
+                    title="Orchestrator Processing Request", description=str(request)
+                )
                 return await self._orchestrate_single_task(task, context or {})
 
         except Exception as e:
@@ -161,41 +181,61 @@ Design comprehensive tool execution plans that achieve task objectives efficient
                 agent_type=AgentType.ORCHESTRATOR,
                 success=False,
                 error=error_msg,
-                execution_time_seconds=0
+                execution_time_seconds=0,
             )
 
-    async def _orchestrate_single_task(self, task: Task, context: Dict[str, Any]) -> AgentResult:
+    async def _orchestrate_single_task(
+        self, task: Task, context: Dict[str, Any]
+    ) -> AgentResult:
         """Orchestrate a single task."""
 
         self.logger.info(f"Orchestrating task: {task.description}")
 
         # Prepare context with available tools
-        tools_context = await self._prepare_detailed_tools_context()
+        with logfire.span("orchestrator_agent.prepare_detailed_tools_context"):
+            tools_context = await self._prepare_detailed_tools_context()
 
         # Get tool recommendations
-        recommended_tools = await self.get_tool_recommendations(task)
+        with logfire.span(
+            "orchestrator_agent.get_tool_recommendations",
+            task_description=task.description,
+        ):
+            recommended_tools = await self.get_tool_recommendations(task)
 
         # Create enhanced prompt
-        enhanced_prompt = await self._create_task_orchestration_prompt(
-            task, context, tools_context, recommended_tools
-        )
+        with logfire.span("orchestrator_agent.create_task_orchestration_prompt"):
+            enhanced_prompt = await self._create_task_orchestration_prompt(
+                task, context, tools_context, recommended_tools
+            )
 
         # Execute orchestration
-        self.logger.debug(
-            "Executing orchestrator agent with task-specific prompt")
-        response = await self.agent.run(enhanced_prompt)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug("Executing orchestrator agent with task-specific prompt")
+
+        with logfire.span(
+            "orchestrator_agent.agent_run", prompt_length=len(enhanced_prompt)
+        ):
+            response = await self.agent.run(enhanced_prompt)
 
         # Extract execution plan
         execution_plan = response.output
 
         # Validate and enhance the plan
-        enhanced_plan = await self._enhance_execution_plan(execution_plan, tools_context)
+        with logfire.span(
+            "orchestrator_agent.enhance_execution_plan",
+            steps_count=len(execution_plan.execution_steps),
+        ):
+            enhanced_plan = await self._enhance_execution_plan(
+                execution_plan, tools_context
+            )
 
         # Extract token usage
         token_usage = self._extract_token_usage(response)
 
-        self.logger.info(f"Orchestration completed with {
-                         len(execution_plan.execution_steps)} steps")
+        self.logger.info(
+            f"Orchestration completed with {
+                         len(execution_plan.execution_steps)} steps"
+        )
 
         return AgentResult(
             agent_type=AgentType.ORCHESTRATOR,
@@ -208,41 +248,48 @@ Design comprehensive tool execution plans that achieve task objectives efficient
                 "task_description": task.description,
                 "step_count": len(execution_plan.execution_steps),
                 "estimated_duration": execution_plan.estimated_duration_seconds,
-                "recommended_tools": recommended_tools
-            }
+                "recommended_tools": recommended_tools,
+            },
         )
 
-    async def _orchestrate_task_list(self, task_list: TaskList, context: Dict[str, Any]) -> AgentResult:
+    async def _orchestrate_task_list(
+        self, task_list: TaskList, context: Dict[str, Any]
+    ) -> AgentResult:
         """Orchestrate multiple tasks in a task list."""
 
-        self.logger.info(f"Orchestrating task list with {
-                         len(task_list.tasks)} tasks")
+        self.logger.info(
+            f"Orchestrating task list with {
+                         len(task_list.tasks)} tasks"
+        )
 
         orchestration_results = []
         total_estimated_duration = 0
 
         # Orchestrate each task
-        for task in task_list.tasks:
-            task_result = await self._orchestrate_single_task(task, context)
-            orchestration_results.append(task_result)
+        with logfire.span(
+            "orchestrator_agent.orchestrate_task_list", task_count=len(task_list.tasks)
+        ):
+            for task in task_list.tasks:
+                task_result = await self._orchestrate_single_task(task, context)
+                orchestration_results.append(task_result)
 
-            if task_result.success and task_result.output:
-                total_estimated_duration += task_result.output.estimated_duration_seconds
+                if task_result.success and task_result.output:
+                    total_estimated_duration += (
+                        task_result.output.estimated_duration_seconds
+                    )
 
         # Create summary
-        successful_orchestrations = [
-            r for r in orchestration_results if r.success]
+        successful_orchestrations = [r for r in orchestration_results if r.success]
 
         return AgentResult(
             agent_type=AgentType.ORCHESTRATOR,
-            success=len(successful_orchestrations) == len(
-                orchestration_results),
+            success=len(successful_orchestrations) == len(orchestration_results),
             output={
                 "task_list_id": task_list.id,
                 "orchestration_results": orchestration_results,
                 "total_estimated_duration_seconds": total_estimated_duration,
                 "successful_tasks": len(successful_orchestrations),
-                "total_tasks": len(orchestration_results)
+                "total_tasks": len(orchestration_results),
             },
             execution_time_seconds=0,
             metadata={
@@ -250,15 +297,16 @@ Design comprehensive tool execution plans that achieve task objectives efficient
                 "orchestration_summary": {
                     "total_tasks": len(orchestration_results),
                     "successful": len(successful_orchestrations),
-                    "failed": len(orchestration_results) - len(successful_orchestrations)
-                }
-            }
+                    "failed": len(orchestration_results)
+                    - len(successful_orchestrations),
+                },
+            },
         )
 
     async def _prepare_detailed_tools_context(self) -> Dict[str, Any]:
         """Prepare detailed context about available tools."""
         try:
-            all_tools = await self.mcp_bridge.get_available_tools()
+            all_tools = await self.tool_bridge.get_available_tools()
 
             # Group by server with detailed information
             tools_by_server = {}
@@ -267,22 +315,23 @@ Design comprehensive tool execution plans that achieve task objectives efficient
                 if server_type not in tools_by_server:
                     tools_by_server[server_type] = []
 
-                tools_by_server[server_type].append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                    "server_id": tool.server_id
-                })
+                tools_by_server[server_type].append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                        "server_id": tool.server_id,
+                    }
+                )
 
             return {
                 "tools_by_server": tools_by_server,
                 "total_tools": len(all_tools),
-                "server_status": await self.mcp_bridge.get_server_status()
+                "server_status": await self.tool_bridge.get_server_status(),
             }
 
         except Exception as e:
-            self.logger.warning(
-                f"Failed to prepare detailed tools context: {e}")
+            self.logger.warning(f"Failed to prepare detailed tools context: {e}")
             return {"error": str(e)}
 
     async def _create_task_orchestration_prompt(
@@ -290,23 +339,24 @@ Design comprehensive tool execution plans that achieve task objectives efficient
         task: Task,
         context: Dict[str, Any],
         tools_context: Dict[str, Any],
-        recommended_tools: List[str]
+        recommended_tools: List[str],
     ) -> str:
         """Create a detailed prompt for task orchestration."""
 
         # Build detailed tools description
         tools_description = "Available MCP tools with details:\n\n"
         for server_type, tools in tools_context.get("tools_by_server", {}).items():
-            tools_description += f"{server_type.upper()} SERVER:\n"
+            tools_description += f"{server_type} server:\n"
             for tool in tools:
                 tools_description += f"  • {tool['name']
                                             }: {tool['description']}\n"
-                if tool.get('parameters'):
+                if tool.get("parameters"):
                     # Show key parameters
-                    params = tool['parameters']
-                    if isinstance(params, dict) and 'properties' in params:
-                        param_names = list(params['properties'].keys())[
-                            :3]  # First 3 params
+                    params = tool["parameters"]
+                    if isinstance(params, dict) and "properties" in params:
+                        param_names = list(params["properties"].keys())[
+                            :3
+                        ]  # First 3 params
                         if param_names:
                             tools_description += f"    Parameters: {
                                 ', '.join(param_names)}\n"
@@ -355,15 +405,13 @@ Focus on creating a practical, executable plan that achieves the task objectives
         return prompt
 
     async def _enhance_execution_plan(
-        self,
-        plan: ToolExecutionPlan,
-        tools_context: Dict[str, Any]
+        self, plan: ToolExecutionPlan, tools_context: Dict[str, Any]
     ) -> ToolExecutionPlan:
         """Enhance and validate the execution plan."""
 
         # Validate tool names and servers
         available_tools = {}
-        for server_type, tools in tools_context.get("tools_by_server", {}).items():
+        for _server_type, tools in tools_context.get("tools_by_server", {}).items():
             for tool in tools:
                 available_tools[tool["name"]] = tool
 
@@ -371,25 +419,29 @@ Focus on creating a practical, executable plan that achieves the task objectives
         for step in plan.execution_steps:
             if step.tool_name not in available_tools:
                 self.logger.warning(
-                    f"Tool {step.tool_name} not found in available tools")
+                    f"Tool {step.tool_name} not found in available tools"
+                )
             else:
-                # Update server_id if needed
+                # Update server_id if needed or incorrect
                 tool_info = available_tools[step.tool_name]
-                if not step.server_id:
-                    step.server_id = tool_info.get("server_id", "unknown")
+                correct_server_id = tool_info.get("server_id", "unknown")
+                if not step.server_id or step.server_id != correct_server_id:
+                    self.logger.info(f"Correcting server_id for {step.tool_name}: {step.server_id} -> {correct_server_id}")
+                    step.server_id = correct_server_id
 
         # Add execution metadata
         plan.metadata = {
             "validation_passed": True,
             "available_tools_count": len(available_tools),
-            "orchestration_timestamp": tools_context.get("server_status", {}).get("last_cache_update", 0)
+            "orchestration_timestamp": tools_context.get("server_status", {}).get(
+                "last_cache_update", 0
+            ),
         }
 
         return plan
 
     async def optimize_execution_sequence(
-        self,
-        execution_plans: List[ToolExecutionPlan]
+        self, execution_plans: List[ToolExecutionPlan]
     ) -> Dict[str, Any]:
         """Optimize the execution sequence across multiple plans."""
 
@@ -418,16 +470,20 @@ Focus on creating a practical, executable plan that achieves the task objectives
                     consecutive_tools[key].append((i, i + 1))
 
             if consecutive_tools:
-                optimizations.append({
-                    "type": "batch_opportunity",
-                    "task_id": plan.task_id,
-                    "consecutive_tools": consecutive_tools
-                })
+                optimizations.append(
+                    {
+                        "type": "batch_opportunity",
+                        "task_id": plan.task_id,
+                        "consecutive_tools": consecutive_tools,
+                    }
+                )
 
         return {
             "total_execution_plans": len(execution_plans),
             "total_execution_steps": total_steps,
             "tool_usage_distribution": tool_usage,
             "optimization_opportunities": optimizations,
-            "estimated_total_duration": sum(p.estimated_duration_seconds for p in execution_plans)
+            "estimated_total_duration": sum(
+                p.estimated_duration_seconds for p in execution_plans
+            ),
         }

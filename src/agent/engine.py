@@ -1,23 +1,25 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional, Callable, AsyncIterator
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
-from .models import AgentConfig, AgentType
-from .workflow import WorkflowExecutor
+import logfire
+
+from .models import AgentConfig, AgentType, ProgressUpdate
 from .tasks import ReasoningChain
+from .workflow import WorkflowExecutor
 
 
 class AgentEngine:
     def __init__(
         self,
-        default_models: Dict[str, str] = None,
-        api_key: str = None,
-        logger: Optional[logging.Logger] = None
+        default_models: Optional[Dict[str, str]] = None,
+        api_key: Optional[str] = None,
+        logger: Optional[logging.Logger] = None,
     ):
         """
         Initialize the agent engine with configurable models and API key.
-        
+
         Args:
             default_models: Default models for each agent type
             api_key: API key for the LLM provider
@@ -25,29 +27,33 @@ class AgentEngine:
         """
         self.logger = logger or logging.getLogger("AgentEngine")
         self.api_key = api_key
-        
+
         # Set API key in environment for Pydantic AI
         if api_key:
             # Determine which API key environment variable to set based on model names
             if any("anthropic" in model for model in (default_models or {}).values()):
                 os.environ["ANTHROPIC_API_KEY"] = api_key
-                self.logger.info("Set ANTHROPIC_API_KEY environment variable for Pydantic AI")
+                self.logger.info(
+                    "Set ANTHROPIC_API_KEY environment variable for Pydantic AI"
+                )
             elif any("openai" in model for model in (default_models or {}).values()):
                 os.environ["OPENAI_API_KEY"] = api_key
-                self.logger.info("Set OPENAI_API_KEY environment variable for Pydantic AI")
+                self.logger.info(
+                    "Set OPENAI_API_KEY environment variable for Pydantic AI"
+                )
 
         # Default model configuration
         self.default_models = default_models or {
             "planning": "anthropic:claude-3-5-sonnet-latest",
             "orchestrator": "anthropic:claude-3-5-sonnet-latest",
-            "execution": "anthropic:claude-3-5-sonnet-latest"
+            "execution": "anthropic:claude-3-5-sonnet-latest",
         }
 
         # Tool bridge will be injected by the application layer
         self._tool_bridge = None
 
-        # Workflow executor (initialized lazily)
-        self._workflow_executor: Optional[WorkflowExecutor] = None
+        # Workflow executor (initialized in initialize())
+        self._workflow_executor: WorkflowExecutor
         self._initialized = False
 
         self.logger.info("AgentEngine initialized")
@@ -56,31 +62,39 @@ class AgentEngine:
         """Set the tool bridge for agent tool execution."""
         self._tool_bridge = tool_bridge
         self.logger.info("Tool bridge configured for agent engine")
-    
+
     async def initialize(self) -> None:
         """Initialize the agent engine and all components."""
         if self._initialized:
             return
 
         if not self._tool_bridge:
-            raise RuntimeError("Tool bridge must be set before initializing agent engine")
+            raise RuntimeError(
+                "Tool bridge must be set before initializing agent engine"
+            )
 
+        with logfire.span("agent_engine.initialize"):
+            return await self._initialize_impl()
+
+    async def _initialize_impl(self) -> None:
+        """Internal implementation of initialization."""
         try:
             self.logger.info("Initializing AgentEngine")
 
             # Create agent configurations
-            agent_configs = self._create_agent_configurations()
+            with logfire.span("agent_engine.create_agent_configurations"):
+                agent_configs = self._create_agent_configurations()
 
             # Initialize workflow executor with tool bridge
-            self._workflow_executor = WorkflowExecutor(
-                tool_bridge=self._tool_bridge,
-                planning_config=agent_configs["planning"],
-                orchestrator_config=agent_configs["orchestrator"],
-                execution_config=agent_configs["execution"],
-                logger=self.logger
-            )
-
-            await self._workflow_executor.initialize()
+            with logfire.span("agent_engine.initialize_workflow_executor"):
+                self._workflow_executor = WorkflowExecutor(
+                    tool_bridge=self._tool_bridge,
+                    planning_config=agent_configs["planning"],
+                    orchestrator_config=agent_configs["orchestrator"],
+                    execution_config=agent_configs["execution"],
+                    logger=self.logger,
+                )
+                await self._workflow_executor.initialize()
 
             self._initialized = True
             self.logger.info("AgentEngine initialization completed")
@@ -96,27 +110,27 @@ class AgentEngine:
                 agent_type=AgentType.PLANNING,
                 model=self.default_models["planning"],
                 temperature=0.7,
-                max_tokens=4000
+                max_tokens=4000,
             ),
             "orchestrator": AgentConfig(
                 agent_type=AgentType.ORCHESTRATOR,
                 model=self.default_models["orchestrator"],
                 temperature=0.3,  # Lower temperature for more deterministic tool selection
-                max_tokens=4000
+                max_tokens=4000,
             ),
             "execution": AgentConfig(
                 agent_type=AgentType.EXECUTION,
                 model=self.default_models["execution"],
                 temperature=0.5,
-                max_tokens=4000
-            )
+                max_tokens=4000,
+            ),
         }
 
     async def process_query(
         self,
         user_query: str,
-        context: Dict[str, Any] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Callable[[ProgressUpdate], Awaitable[None]],
+        context: Optional[Dict[str, Any]] = None,
     ) -> ReasoningChain:
         """
         Process a user query through the complete multi-agent workflow.
@@ -135,17 +149,43 @@ class AgentEngine:
         if not self._workflow_executor:
             raise RuntimeError("Workflow executor not initialized")
 
+        # Type narrowing for mypy
+        assert self._workflow_executor is not None
+
         self.logger.info(f"Processing user query: {user_query}")
+
+        with logfire.span(
+            "agent_engine.process_query",
+            query_length=len(user_query),
+            has_context=context is not None,
+        ):
+            return await self._process_query_impl(
+                user_query, progress_callback, context
+            )
+
+    async def _process_query_impl(
+        self,
+        user_query: str,
+        progress_callback: Callable[[ProgressUpdate], Awaitable[None]],
+        context: Optional[Dict[str, Any]],
+    ) -> ReasoningChain:
+        """Internal implementation of query processing."""
+        if not self._initialized:
+            raise RuntimeError(
+                "AgentEngine must be initialized before processing queries"
+            )
 
         try:
             reasoning_chain = await self._workflow_executor.execute_query(
                 user_query=user_query,
                 context=context or {},
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
-            self.logger.info(f"Query processing completed with status: {
-                             reasoning_chain.status}")
+            self.logger.info(
+                f"Query processing completed with status: {
+                             reasoning_chain.status}"
+            )
 
             return reasoning_chain
 
@@ -154,9 +194,7 @@ class AgentEngine:
             raise
 
     async def process_query_streaming(
-        self,
-        user_query: str,
-        context: Dict[str, Any] = None
+        self, user_query: str, context: Optional[Dict[str, Any]] = None
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         Process a query with streaming progress updates.
@@ -175,7 +213,7 @@ class AgentEngine:
 
         # Start query processing
         task = asyncio.create_task(
-            self.process_query(user_query, context, progress_callback)
+            self.process_query(user_query, progress_callback, context)
         )
 
         # Stream progress updates
@@ -184,10 +222,7 @@ class AgentEngine:
             # Yield any new progress updates
             new_updates = progress_updates[last_update_count:]
             for update in new_updates:
-                yield {
-                    "type": "progress",
-                    "data": update.model_dump()
-                }
+                yield {"type": "progress", "data": update.model_dump()}
 
             last_update_count = len(progress_updates)
 
@@ -197,15 +232,9 @@ class AgentEngine:
         # Get final result
         try:
             reasoning_chain = await task
-            yield {
-                "type": "result",
-                "data": reasoning_chain.model_dump()
-            }
+            yield {"type": "result", "data": reasoning_chain.model_dump()}
         except Exception as e:
-            yield {
-                "type": "error",
-                "data": {"error": str(e)}
-            }
+            yield {"type": "error", "data": {"error": str(e)}}
 
     async def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get information about all available tools via tool bridge."""
@@ -219,7 +248,7 @@ class AgentEngine:
                 "server_type": tool.server_type,
                 "server_id": tool.server_id,
                 "description": tool.description,
-                "parameters": tool.parameters
+                "parameters": tool.parameters,
             }
             for tool in tools
         ]
@@ -228,7 +257,7 @@ class AgentEngine:
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        server_id: Optional[str] = None
+        server_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a single tool directly via tool bridge.
@@ -245,20 +274,18 @@ class AgentEngine:
             raise RuntimeError("Tool bridge not configured")
 
         from app.models import ToolExecutionRequest
-        
+
         request = ToolExecutionRequest(
-            tool_name=tool_name,
-            parameters=parameters,
-            server_id=server_id
+            tool_name=tool_name, parameters=parameters, server_id=server_id
         )
-        
+
         response = await self._tool_bridge.execute_tool_request(request)
 
         return {
             "success": response.success,
             "result": response.result,
             "error": response.error,
-            "execution_time_seconds": response.execution_time_seconds
+            "execution_time_seconds": response.execution_time_seconds,
         }
 
     async def analyze_query_complexity(self, user_query: str) -> Dict[str, Any]:
@@ -279,13 +306,14 @@ class AgentEngine:
 
         # Use just the planning agent for quick analysis
         try:
-            result = await self._workflow_executor.planning_agent.analyze_query_complexity(user_query)
+            result = (
+                await self._workflow_executor.planning_agent.analyze_query_complexity(
+                    user_query
+                )
+            )
             return result
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status."""
@@ -294,13 +322,15 @@ class AgentEngine:
             "agent_engine": {
                 "initialized": self._initialized,
                 "default_models": self.default_models,
-                "tool_bridge_configured": self._tool_bridge is not None
+                "tool_bridge_configured": self._tool_bridge is not None,
             },
-            "workflow_executor": None
+            "workflow_executor": None,
         }
 
         if self._workflow_executor:
-            status["workflow_executor"] = await self._workflow_executor.get_workflow_status()
+            status["workflow_executor"] = (
+                await self._workflow_executor.get_workflow_status()
+            )
 
         return status
 
@@ -314,8 +344,7 @@ class AgentEngine:
         for agent_type, model in model_updates.items():
             if agent_type in self.default_models:
                 self.default_models[agent_type] = model
-                self.logger.info(
-                    f"Updated {agent_type} agent model to {model}")
+                self.logger.info(f"Updated {agent_type} agent model to {model}")
 
         # Reinitialize if already initialized
         if self._initialized:
@@ -330,7 +359,9 @@ class AgentEngine:
 
         return await self._workflow_executor.cancel_workflow()
 
-    def get_reasoning_chain_summary(self, reasoning_chain: ReasoningChain) -> Dict[str, Any]:
+    def get_reasoning_chain_summary(
+        self, reasoning_chain: ReasoningChain
+    ) -> Dict[str, Any]:
         """Get a summary of a reasoning chain execution."""
         return {
             "id": reasoning_chain.id,
@@ -341,7 +372,7 @@ class AgentEngine:
             "task_count": len(reasoning_chain.task_list.tasks),
             "reasoning_steps": len(reasoning_chain.reasoning_steps),
             "final_result": reasoning_chain.final_result,
-            "progress_summary": reasoning_chain.get_progress_summary()
+            "progress_summary": reasoning_chain.get_progress_summary(),
         }
 
     async def health_check(self) -> Dict[str, Any]:
@@ -351,7 +382,7 @@ class AgentEngine:
             "tool_bridge": "unknown",
             "workflow_executor": "unknown",
             "agents": {},
-            "overall": "unknown"
+            "overall": "unknown",
         }
 
         try:
@@ -378,12 +409,16 @@ class AgentEngine:
                     self._workflow_executor.planning_agent.health_check(),
                     self._workflow_executor.orchestrator_agent.health_check(),
                     self._workflow_executor.execution_agent.health_check(),
-                    return_exceptions=True
+                    return_exceptions=True,
                 )
 
-                for i, agent_type in enumerate(["planning", "orchestrator", "execution"]):
+                for i, agent_type in enumerate(
+                    ["planning", "orchestrator", "execution"]
+                ):
                     if isinstance(agents_health[i], Exception):
-                        health_status["agents"][agent_type] = f"error: {
+                        health_status["agents"][
+                            agent_type
+                        ] = f"error: {
                             agents_health[i]}"
                     else:
                         health_status["agents"][agent_type] = agents_health[i]
@@ -392,7 +427,7 @@ class AgentEngine:
             component_statuses = [
                 health_status["agent_engine"],
                 health_status["tool_bridge"],
-                health_status["workflow_executor"]
+                health_status["workflow_executor"],
             ]
 
             if all(status == "healthy" for status in component_statuses):
@@ -406,119 +441,135 @@ class AgentEngine:
             health_status["overall"] = f"error: {str(e)}"
 
         return health_status
-    
+
     async def get_agents_status(self) -> List[Dict[str, Any]]:
         """Get status of all agents."""
         if not self._workflow_executor:
             return []
-        
+
         try:
             planning_status = await self._workflow_executor.planning_agent.get_status()
-            orchestrator_status = await self._workflow_executor.orchestrator_agent.get_status()
-            execution_status = await self._workflow_executor.execution_agent.get_status()
-            
+            orchestrator_status = (
+                await self._workflow_executor.orchestrator_agent.get_status()
+            )
+            execution_status = (
+                await self._workflow_executor.execution_agent.get_status()
+            )
+
             return [
                 {
                     "name": "Planning Agent",
                     "type": "planning",
                     "status": planning_status.get("status", "idle"),
                     "current_task": planning_status.get("current_task"),
-                    "capabilities": ["query_analysis", "task_planning", "requirement_validation"]
+                    "capabilities": [
+                        "query_analysis",
+                        "task_planning",
+                        "requirement_validation",
+                    ],
                 },
                 {
-                    "name": "Orchestrator Agent", 
+                    "name": "Orchestrator Agent",
                     "type": "orchestrator",
                     "status": orchestrator_status.get("status", "idle"),
                     "current_task": orchestrator_status.get("current_task"),
-                    "capabilities": ["workflow_coordination", "task_management", "dependency_resolution"]
+                    "capabilities": [
+                        "workflow_coordination",
+                        "task_management",
+                        "dependency_resolution",
+                    ],
                 },
                 {
                     "name": "Execution Agent",
-                    "type": "execution", 
+                    "type": "execution",
                     "status": execution_status.get("status", "idle"),
                     "current_task": execution_status.get("current_task"),
-                    "capabilities": ["tool_execution", "result_processing", "error_handling"]
-                }
+                    "capabilities": [
+                        "tool_execution",
+                        "result_processing",
+                        "error_handling",
+                    ],
+                },
             ]
         except Exception as e:
             self.logger.error(f"Failed to get agents status: {e}")
             return []
-    
+
     async def get_workflow_status(self, workflow_id: str) -> Optional[Dict[str, Any]]:
         """Get workflow status by ID."""
         if not self._workflow_executor:
             return None
-        
+
         try:
             return await self._workflow_executor.get_workflow_status(workflow_id)
         except Exception as e:
             self.logger.error(f"Failed to get workflow status: {e}")
             return None
-    
+
     async def get_tasks_status(self, workflow_id: str) -> List[Dict[str, Any]]:
         """Get tasks status for a workflow."""
         if not self._workflow_executor:
             return []
-        
+
         try:
             return await self._workflow_executor.get_tasks_status(workflow_id)
         except Exception as e:
             self.logger.error(f"Failed to get tasks status: {e}")
             return []
-    
+
     async def get_reasoning_chain(self, workflow_id: str) -> List[Dict[str, Any]]:
         """Get reasoning chain for a workflow."""
         if not self._workflow_executor:
             return []
-        
+
         try:
             return await self._workflow_executor.get_reasoning_chain(workflow_id)
         except Exception as e:
             self.logger.error(f"Failed to get reasoning chain: {e}")
             return []
-    
+
     async def get_planning_agent_status(self) -> Optional[Dict[str, Any]]:
         """Get planning agent specific status."""
         if not self._workflow_executor:
             return None
-        
+
         try:
             status = await self._workflow_executor.planning_agent.get_status()
             return {
                 "status": status.get("status", "idle"),
                 "current_analysis": status.get("current_analysis"),
-                "plan": status.get("generated_plan", [])
+                "plan": status.get("generated_plan", []),
             }
         except Exception as e:
             self.logger.error(f"Failed to get planning agent status: {e}")
             return None
-    
+
     async def get_execution_agent_status(self) -> Optional[Dict[str, Any]]:
         """Get execution agent specific status."""
         if not self._workflow_executor:
             return None
-        
+
         try:
             status = await self._workflow_executor.execution_agent.get_status()
             return {
                 "status": status.get("status", "idle"),
                 "current_task": status.get("current_task"),
                 "tools_executing": status.get("active_tools", []),
-                "completed_tasks": status.get("completed_tasks", 0)
+                "completed_tasks": status.get("completed_tasks", 0),
             }
         except Exception as e:
             self.logger.error(f"Failed to get execution agent status: {e}")
             return None
-    
+
     async def shutdown(self) -> None:
         """Shutdown the agent engine and cleanup resources."""
         self.logger.info("Shutting down agent engine...")
-        
-        if self._workflow_executor:
+
+        if self._initialized and hasattr(self, "_workflow_executor"):
             await self._workflow_executor.cancel_workflow()
-            
+
         self._initialized = False
         self._tool_bridge = None
-        self._workflow_executor = None
-        
+        # Note: _workflow_executor remains available but _initialized=False prevents its use
+
         self.logger.info("Agent engine shutdown completed")

@@ -34,8 +34,11 @@ The system automatically connects to 5 specialized servers on startup:
 3. **Codebase Server** (6 tools): Project analysis, structure discovery, definition finding, and documentation
 4. **DevTools Server** (6 tools): Development automation with secure command execution and comprehensive tooling
 5. **Exa Server** (2 tools): Real-time web search, content crawling, and current information access
+6. **Context7** (2 tools): Language and framework documentation
 
-**Total: 33 tools across 5 servers - All auto-connecting on startup**
+### Query Flow
+
+WebSocket Query → server.py → app/handler.py → app/streaming.py → app/coordinator.py → agent/engine.py → agent/workflow.py → agents → tool_bridge → tool_adapters → MCP servers
 
 ## 📦 Installation
 
@@ -47,23 +50,27 @@ The system automatically connects to 5 specialized servers on startup:
 ### Setup
 
 1. **Clone the repository:**
+
    ```bash
    git clone <repository-url>
    cd brain
    ```
 
 2. **Install uv (if not already installed):**
+
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
 3. **Create and activate virtual environment:**
+
    ```bash
    uv venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
 4. **Install dependencies:**
+
    ```bash
    uv pip install -r requirements.txt
    ```
@@ -109,6 +116,7 @@ python src/main.py
 ```
 
 The Brain server will:
+
 - Start WebSocket server on `ws://localhost:3789`
 - Auto-connect to all 5 built-in MCP servers (33 tools total)
 - Initialize configuration directory at `~/.brain/`
@@ -122,6 +130,7 @@ Connect to `ws://localhost:3789` and send JSON commands:
 #### Available Commands
 
 **1. Query Processing**
+
 ```json
 {
   "command": "query",
@@ -130,6 +139,7 @@ Connect to `ws://localhost:3789` and send JSON commands:
 ```
 
 **2. List Connected Servers**
+
 ```json
 {
   "command": "get_servers"
@@ -137,6 +147,7 @@ Connect to `ws://localhost:3789` and send JSON commands:
 ```
 
 **3. List Tools from Specific Server**
+
 ```json
 {
   "command": "list_tools",
@@ -145,6 +156,7 @@ Connect to `ws://localhost:3789` and send JSON commands:
 ```
 
 **4. Connect Custom MCP Server**
+
 ```json
 {
   "command": "connect_server",
@@ -258,11 +270,13 @@ brain  # Start interactive REPL
 Connect to the Brain server from any WebSocket client:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:3789');
-ws.send(JSON.stringify({
-  command: 'query',
-  query: 'What files are in the current directory?'
-}));
+const ws = new WebSocket("ws://localhost:3789");
+ws.send(
+  JSON.stringify({
+    command: "query",
+    query: "What files are in the current directory?",
+  }),
+);
 ```
 
 ## 📚 API Reference
@@ -276,7 +290,7 @@ class CustomEngine(BaseEngine):
     async def stream_response(self, messages, tools=None, system=None):
         # Implement streaming response
         pass
-    
+
     async def get_response(self, messages, tools=None, system=None):
         # Implement standard response
         pass
@@ -291,16 +305,19 @@ Built-in servers follow the MCP specification. See `src/mcp_brain/servers/` for 
 ### Common Issues
 
 **Connection Issues:**
+
 - Ensure the server is running on the correct port
 - Check firewall settings for WebSocket connections
 - Verify environment variables are set correctly
 
 **MCP Server Issues:**
+
 - Check `~/.brain/brain.log` for detailed error messages
 - Ensure MCP server scripts are executable
 - Verify Python path and dependencies
 
 **API Key Issues:**
+
 - Confirm API keys are set in `.env` file
 - Test API keys with direct provider calls
 - Check API key permissions and rate limits

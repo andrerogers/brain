@@ -12,17 +12,18 @@ This package serves as the main application interface that:
 """
 
 from .coordinator import AppCoordinator
-from .tool_bridge import ToolBridge
-from .streaming import AppStreamingHandler, WebSocketAppIntegration
+from .models import AppProgress, AppSession
 from .session import SessionManager
-from .models import AppSession, AppProgress
+from .streaming import AppStreamingHandler
+from .handler import WebSocketHandler
+from .tool_bridge import ToolBridge
 
 __all__ = [
-    'AppCoordinator',
-    'ToolBridge', 
-    'AppStreamingHandler',
-    'WebSocketAppIntegration',
-    'SessionManager',
-    'AppSession',
-    'AppProgress'
+    "AppCoordinator",
+    "ToolBridge",
+    "AppStreamingHandler",
+    "WebSocketHandler",
+    "SessionManager",
+    "AppSession",
+    "AppProgress",
 ]

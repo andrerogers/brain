@@ -1,73 +1,95 @@
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Load environment variables from .env and system environment
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
     # Server settings
-    host: str = Field("0.0.0.0", env="HOST")
-    port: int = Field(8000, env="PORT")
-
-    # LLM settings
-    engine_type: str = Field("anthropic", env="ENGINE_TYPE")
-
-    # RAG settings
-    rag_top_k: int = Field(3, env="RAG_TOP_K")
-
-    # Anthropic settings
-    anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
-    anthropic_embedding_model: str = Field("claude-3-7-embeddings-v1",
-                                           env="ANTHROPIC_EMBEDDING_MODEL")
-    anthropic_llm_model: str = Field("claude-3-7-sonnet-20250219",
-                                     env="ANTHROPIC_LLM_MODEL")
-
-    # OpenAI settings
-    openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
-    openai_embedding_model: str = Field("text-embedding-3-large",
-                                        env="OPENAI_EMBEDDING_MODEL")
-    openai_llm_model: str = Field("gpt-4", env="OPENAI_LLM_MODEL")
-
-    # General LLM settings
-    max_tokens: int = Field(1000, env="MAX_TOKENS")
-
-    # MCP Server API Keys
-    exa_api_key: str = Field(None, env="EXA_API_KEY")
+    host: str = Field(default="0.0.0.0", validation_alias="HOST")
+    port: int = Field(default=8000, validation_alias="PORT")
 
     # Debug mode
-    debug: bool = Field(False, env="DEBUG")
+    debug: bool = Field(default=False, validation_alias="DEBUG")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # LLM settings
+    engine_type: str = Field(default="anthropic", validation_alias="ENGINE_TYPE")
 
-    def get_engine_config(self) -> Dict[str, Any]:
-        """Get the configuration dictionary for the selected engine type."""
-        # Changed rag_type to engine_type to match the field name
-        if self.engine_type.lower() == 'anthropic':
+    # General LLM settings
+    max_tokens: int = Field(default=1000, validation_alias="MAX_TOKENS")
+
+    # Anthropic settings
+    anthropic_api_key: Optional[str] = Field(
+        default=None, validation_alias="ANTHROPIC_API_KEY"
+    )
+    anthropic_embedding_model: str = Field(
+        default="claude-3-7-embeddings-v1",
+        validation_alias="ANTHROPIC_EMBEDDING_MODEL",
+    )
+    anthropic_llm_model: str = Field(
+        default="claude-3-7-sonnet-20250219",
+        validation_alias="ANTHROPIC_LLM_MODEL",
+    )
+
+    # OpenAI settings
+    openai_api_key: Optional[str] = Field(
+        default=None, validation_alias="OPENAI_API_KEY"
+    )
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-large",
+        validation_alias="OPENAI_EMBEDDING_MODEL",
+    )
+    openai_llm_model: str = Field(
+        default="gpt-4",
+        validation_alias="OPENAI_LLM_MODEL",
+    )
+
+    # MCP Server API Key
+    exa_api_key: Optional[str] = Field(default=None, validation_alias="EXA_API_KEY")
+
+    # Logfire settings
+    logfire_enabled: bool = Field(default=False, validation_alias="LOGFIRE_ENABLED")
+    logfire_token: Optional[str] = Field(default=None, validation_alias="LOGFIRE_TOKEN")
+    logfire_service_name: str = Field(
+        default="brain", validation_alias="LOGFIRE_SERVICE_NAME"
+    )
+
+    def get_llm_config(self) -> Dict[str, Any]:
+        """Return the engine-specific configuration dictionary."""
+        llm_engine = self.engine_type.lower()
+        if llm_engine == "anthropic":
             if not self.anthropic_api_key:
-                raise ValueError("ANTHROPIC_API_KEY is required "
-                                 "when ENGINE_TYPE is 'anthropic'")
+                raise ValueError(
+                    "ANTHROPIC_API_KEY is required when ENGINE_TYPE is 'anthropic'"
+                )
             return {
-                'api_key': self.anthropic_api_key,
-                'embedding_model': self.anthropic_embedding_model,
-                'llm_model': self.anthropic_llm_model,
-                'max_tokens': self.max_tokens,
-                'exa_api_key': self.exa_api_key
+                "api_key": self.anthropic_api_key,
+                "embedding_model": self.anthropic_embedding_model,
+                "llm_model": self.anthropic_llm_model,
+                "max_tokens": self.max_tokens,
+                "exa_api_key": self.exa_api_key,
             }
-        elif self.engine_type.lower() == 'openai':
+        elif llm_engine == "openai":
             if not self.openai_api_key:
-                raise ValueError("OPENAI_API_KEY is required "
-                                 "when ENGINE_TYPE is 'openai'")
+                raise ValueError(
+                    "OPENAI_API_KEY is required when ENGINE_TYPE is 'openai'"
+                )
             return {
-                'api_key': self.openai_api_key,
-                'embedding_model': self.openai_embedding_model,
-                'llm_model': self.openai_llm_model,
-                'max_tokens': self.max_tokens
+                "api_key": self.openai_api_key,
+                "embedding_model": self.openai_embedding_model,
+                "llm_model": self.openai_llm_model,
+                "max_tokens": self.max_tokens,
             }
         else:
-            # Changed rag_type to engine_type to match the field name
             raise ValueError(f"Unsupported ENGINE_TYPE: {self.engine_type}")
 
 
 def get_settings() -> Settings:
+    """Instantiate and return the Settings object."""
     return Settings()

@@ -8,6 +8,7 @@ and application state coordination.
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 from agent.models import ProgressUpdate
@@ -16,6 +17,7 @@ from agent.tasks import ReasoningChain
 
 class SessionStatus(str, Enum):
     """Status of an application session."""
+
     INITIALIZING = "initializing"
     READY = "ready"
     PROCESSING = "processing"
@@ -26,6 +28,7 @@ class SessionStatus(str, Enum):
 
 class AppSession(BaseModel):
     """Application session for tracking user interactions."""
+
     session_id: str
     status: SessionStatus = SessionStatus.INITIALIZING
     user_query: Optional[str] = None
@@ -87,15 +90,18 @@ class AppSession(BaseModel):
         self.current_step = update.current_task
 
         # Update metadata with progress details
-        self.metadata.update({
-            "last_progress_update": update.model_dump(),
-            "agent_type": update.agent_type,
-            "elapsed_time": update.elapsed_time_seconds
-        })
+        self.metadata.update(
+            {
+                "last_progress_update": update.model_dump(),
+                "agent_type": update.agent_type,
+                "elapsed_time": update.elapsed_time_seconds,
+            }
+        )
 
 
 class AppProgress(BaseModel):
     """Application-level progress information."""
+
     session_id: str
     status: SessionStatus
     progress_percentage: float = Field(ge=0.0, le=100.0)
@@ -115,6 +121,7 @@ class AppProgress(BaseModel):
 
 class ToolExecutionRequest(BaseModel):
     """Request for direct tool execution."""
+
     tool_name: str
     parameters: Dict[str, Any] = Field(default_factory=dict)
     server_id: Optional[str] = None
@@ -124,6 +131,7 @@ class ToolExecutionRequest(BaseModel):
 
 class ToolExecutionResponse(BaseModel):
     """Response from tool execution."""
+
     success: bool
     result: Optional[Any] = None
     error: Optional[str] = None
@@ -135,6 +143,7 @@ class ToolExecutionResponse(BaseModel):
 
 class QueryComplexityAnalysis(BaseModel):
     """Analysis of query complexity."""
+
     query: str
     complexity_level: str  # simple, moderate, complex
     estimated_steps: int
@@ -146,6 +155,7 @@ class QueryComplexityAnalysis(BaseModel):
 
 class SystemHealthStatus(BaseModel):
     """System health status information."""
+
     overall_status: str  # healthy, partial, unhealthy
     components: Dict[str, str] = Field(default_factory=dict)
     active_sessions_count: int

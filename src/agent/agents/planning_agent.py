@@ -1,17 +1,13 @@
-"""
-Planning Agent for query decomposition and task planning.
-
-Analyzes user queries and decomposes them into structured, actionable task lists
-with appropriate priorities and dependencies.
-"""
-
 import json
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
+import logfire
 from pydantic import BaseModel, Field
+from pydantic_ai import Agent
 
 from ..models import AgentConfig, AgentResult, AgentType
+
 # Integration moved to app layer
 from ..tasks import Task, TaskList, TaskPriority
 from .base_agent import BaseAgent
@@ -19,15 +15,17 @@ from .base_agent import BaseAgent
 
 class TaskPlan(BaseModel):
     """Structured output for planning agent."""
+
     analysis: str = Field(description="Analysis of the user query")
     approach: str = Field(description="High-level approach to solve the query")
-    tasks: List[Dict[str, Any]] = Field(
-        description="List of task specifications")
+    tasks: List[Dict[str, Any]] = Field(description="List of task specifications")
     execution_strategy: str = Field(description="Strategy for task execution")
     estimated_complexity: str = Field(
-        description="Complexity assessment: simple, moderate, complex")
+        description="Complexity assessment: simple, moderate, complex"
+    )
     requires_tools: List[str] = Field(
-        default_factory=list, description="Tools that will be needed")
+        default_factory=list, description="Tools that will be needed"
+    )
 
 
 class PlanningAgent(BaseAgent):
@@ -37,20 +35,20 @@ class PlanningAgent(BaseAgent):
 
     Responsibilities:
     - Query analysis and intent understanding
-    - Task decomposition and dependency mapping  
+    - Task decomposition and dependency mapping
     - Priority assignment and complexity assessment
     - Tool requirement identification
     - Execution strategy formulation
     """
 
-    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger = None):
+    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger):
         super().__init__(config, tool_bridge, logger)
 
         # Override agent with structured output
-        self.agent = self.agent.__class__(
+        self.agent = Agent(
             model=config.model,
             system_prompt=config.system_prompt or self.get_default_system_prompt(),
-            output_type=TaskPlan
+            output_type=TaskPlan,
         )
 
     def get_default_system_prompt(self) -> str:
@@ -82,7 +80,11 @@ Available tool categories:
 
 Output a comprehensive task plan with clear analysis, approach, and executable tasks."""
 
-    async def process_request(self, request: Union[str, Dict[str, Any]], context: Dict[str, Any] = None) -> AgentResult:
+    async def process_request(
+        self,
+        request: Union[str, Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> AgentResult:
         """
         Process a planning request and generate a structured task plan.
 
@@ -103,26 +105,43 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
             self.logger.info(f"Planning agent processing query: {query}")
 
             # Prepare context with available tools
-            tools_context = await self._prepare_tools_context()
+            with logfire.span("planning_agent.prepare_tools_context"):
+                tools_context = await self._prepare_tools_context()
 
             # Create enhanced prompt with context
-            enhanced_prompt = await self._create_enhanced_prompt(query, context or {}, tools_context)
+            with logfire.span(
+                "planning_agent.create_enhanced_prompt", query_length=len(query)
+            ):
+                enhanced_prompt = await self._create_enhanced_prompt(
+                    query, context or {}, tools_context
+                )
 
             # Execute planning with Pydantic AI
-            self.logger.debug("Executing planning agent with enhanced prompt")
-            response = await self.agent.run(enhanced_prompt)
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug("Executing planning agent with enhanced prompt")
+
+            with logfire.span(
+                "planning_agent.agent_run", prompt_length=len(enhanced_prompt)
+            ):
+                response = await self.agent.run(enhanced_prompt)
 
             # Extract structured plan
             task_plan = response.output
 
             # Convert to TaskList
-            task_list = await self._convert_plan_to_task_list(task_plan, query)
+            with logfire.span(
+                "planning_agent.convert_plan_to_task_list",
+                plan_tasks_count=len(task_plan.tasks),
+            ):
+                task_list = await self._convert_plan_to_task_list(task_plan, query)
 
             # Extract token usage
             token_usage = self._extract_token_usage(response)
 
-            self.logger.info(f"Planning completed with {
-                             len(task_list.tasks)} tasks")
+            self.logger.info(
+                f"Planning completed with {
+                             len(task_list.tasks)} tasks"
+            )
 
             return AgentResult(
                 agent_type=AgentType.PLANNING,
@@ -134,8 +153,8 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
                     "original_query": query,
                     "task_plan": task_plan.model_dump(),
                     "task_count": len(task_list.tasks),
-                    "estimated_complexity": task_plan.estimated_complexity
-                }
+                    "estimated_complexity": task_plan.estimated_complexity,
+                },
             )
 
         except Exception as e:
@@ -146,14 +165,14 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
                 agent_type=AgentType.PLANNING,
                 success=False,
                 error=error_msg,
-                execution_time_seconds=0
+                execution_time_seconds=0,
             )
 
     async def _prepare_tools_context(self) -> Dict[str, Any]:
         """Prepare context about available tools for planning."""
         try:
             # Get all available tools
-            all_tools = await self.mcp_bridge.get_available_tools()
+            all_tools = await self.tool_bridge.get_available_tools()
 
             # Group by server type
             tools_by_server = {}
@@ -161,15 +180,14 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
                 server_type = tool.server_type
                 if server_type not in tools_by_server:
                     tools_by_server[server_type] = []
-                tools_by_server[server_type].append({
-                    "name": tool.name,
-                    "description": tool.description
-                })
+                tools_by_server[server_type].append(
+                    {"name": tool.name, "description": tool.description}
+                )
 
             return {
                 "tools_by_server": tools_by_server,
                 "total_tools": len(all_tools),
-                "server_types": list(tools_by_server.keys())
+                "server_types": list(tools_by_server.keys()),
             }
 
         except Exception as e:
@@ -177,14 +195,10 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
             return {"error": str(e)}
 
     async def _create_enhanced_prompt(
-        self,
-        query: str,
-        context: Dict[str, Any],
-        tools_context: Dict[str, Any]
+        self, query: str, context: Dict[str, Any], tools_context: Dict[str, Any]
     ) -> str:
         """Create an enhanced prompt with context and available tools."""
 
-        # Build tools description
         tools_description = "Available MCP tools:\n"
         for server_type, tools in tools_context.get("tools_by_server", {}).items():
             tools_description += f"\n{server_type.upper()} SERVER:\n"
@@ -194,7 +208,6 @@ Output a comprehensive task plan with clear analysis, approach, and executable t
             if len(tools) > 5:
                 tools_description += f"  ... and {len(tools) - 5} more tools\n"
 
-        # Build context description
         context_info = ""
         if context:
             context_info = f"\nAdditional context:\n{
@@ -223,7 +236,9 @@ Provide a structured analysis and task breakdown."""
 
         return prompt
 
-    async def _convert_plan_to_task_list(self, task_plan: TaskPlan, original_query: str) -> TaskList:
+    async def _convert_plan_to_task_list(
+        self, task_plan: TaskPlan, original_query: str
+    ) -> TaskList:
         """Convert the structured task plan into a TaskList object."""
 
         task_list = TaskList(
@@ -233,43 +248,87 @@ Provide a structured analysis and task breakdown."""
                 "analysis": task_plan.analysis,
                 "approach": task_plan.approach,
                 "execution_strategy": task_plan.execution_strategy,
-                "estimated_complexity": task_plan.estimated_complexity
-            }
+                "estimated_complexity": task_plan.estimated_complexity,
+            },
         )
 
         # Convert task specifications to Task objects
+        task_id_mapping = {}  # Map task numbers to actual task IDs
+
         for i, task_spec in enumerate(task_plan.tasks):
             # Extract task information with defaults
             description = task_spec.get("description", f"Task {i+1}")
             priority_num = task_spec.get("priority", 2)
-            dependencies = task_spec.get("dependencies", [])
+            dependencies_raw = task_spec.get("dependencies", [])
             tools_required = task_spec.get("tools_required", [])
             estimated_duration = task_spec.get("estimated_duration_seconds")
 
             # Map priority number to enum
-            priority_mapping = {1: TaskPriority.LOW, 2: TaskPriority.MEDIUM,
-                                3: TaskPriority.HIGH, 4: TaskPriority.CRITICAL}
+            priority_mapping = {
+                1: TaskPriority.LOW,
+                2: TaskPriority.MEDIUM,
+                3: TaskPriority.HIGH,
+                4: TaskPriority.CRITICAL,
+            }
             priority = priority_mapping.get(priority_num, TaskPriority.MEDIUM)
 
-            # Create task
+            # Create task first to get its ID
             task = Task(
+                title=f"Task {i + 1}",
                 description=description,
                 priority=priority,
-                dependencies=dependencies,
+                dependencies=[],  # Will be set after all tasks are created
                 tools_required=tools_required,
                 estimated_duration_seconds=estimated_duration,
                 metadata={
                     "task_number": i + 1,
                     "complexity": task_spec.get("complexity", "moderate"),
-                    "category": task_spec.get("category", "general")
-                }
+                    "category": task_spec.get("category", "general"),
+                },
             )
 
             task_list.add_task(task)
+            # Map task number to task ID for dependency resolution
+            task_id_mapping[i + 1] = task.id
+
+        # Now resolve dependencies after all tasks are created
+        for i, task_spec in enumerate(task_plan.tasks):
+            dependencies_raw = task_spec.get("dependencies", [])
+            dependencies = []
+
+            # Convert dependencies to proper task IDs
+            for dep in dependencies_raw:
+                if isinstance(dep, int):
+                    # Convert task number to task ID
+                    if dep in task_id_mapping:
+                        dependencies.append(task_id_mapping[dep])
+                    else:
+                        self.logger.warning(
+                            f"Task {i+1} references non-existent dependency task {dep}"
+                        )
+                elif isinstance(dep, str):
+                    # Check if it's a valid task ID in our mapping
+                    if dep in task_id_mapping.values():
+                        dependencies.append(dep)
+                    else:
+                        # Try to find it as a task number string
+                        try:
+                            dep_num = int(dep)
+                            if dep_num in task_id_mapping:
+                                dependencies.append(task_id_mapping[dep_num])
+                            else:
+                                self.logger.warning(
+                                    f"Task {i+1} references non-existent dependency task {dep}"
+                                )
+                        except ValueError:
+                            self.logger.warning(
+                                f"Task {i+1} has invalid dependency format: {dep}"
+                            )
+
+            task_list.tasks[i].dependencies = dependencies
 
         # Update execution order based on dependencies
-        task_list.execution_order = self._optimize_execution_order(
-            task_list.tasks)
+        task_list.execution_order = self._optimize_execution_order(task_list.tasks)
 
         return task_list
 
@@ -288,7 +347,8 @@ Provide a structured analysis and task breakdown."""
             if task_id in temp_visited:
                 # Circular dependency detected - log warning and continue
                 self.logger.warning(
-                    f"Circular dependency detected involving task {task_id}")
+                    f"Circular dependency detected involving task {task_id}"
+                )
                 return
 
             if task_id in visited:
@@ -308,8 +368,11 @@ Provide a structured analysis and task breakdown."""
             execution_order.append(task_id)
 
         # Sort tasks by priority first (higher priority first)
-        sorted_tasks = sorted(tasks, key=lambda t: (
-            t.priority.value, t.created_at), reverse=True)
+        sorted_tasks = sorted(
+            tasks,
+            key=lambda t: (getattr(t.priority, "value", t.priority), t.created_at),
+            reverse=True,
+        )
 
         # Visit all tasks
         for task in sorted_tasks:
@@ -334,16 +397,18 @@ Provide a brief analysis of:
 Keep the response concise and focused."""
 
         try:
-            response = await self.agent.run(simple_prompt)
+            with logfire.span(
+                "planning_agent.analyze_query_complexity", query_length=len(query)
+            ):
+                response = await self.agent.run(simple_prompt)
 
             return {
                 "success": True,
-                "analysis": response.output if hasattr(response, 'output') else str(response),
-                "token_usage": self._extract_token_usage(response)
+                "analysis": (
+                    response.output if hasattr(response, "output") else str(response)
+                ),
+                "token_usage": self._extract_token_usage(response),
             }
 
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}

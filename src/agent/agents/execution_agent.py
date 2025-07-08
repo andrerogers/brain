@@ -1,25 +1,26 @@
 import json
 import logging
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
+import logfire
 from pydantic import BaseModel, Field
+from pydantic_ai import Agent
 
+from ..models import AgentConfig, AgentResult, AgentType
 from .base_agent import BaseAgent
-from ..models import AgentConfig, AgentResult, AgentType, ToolCall
 from .orchestrator_agent import ToolExecutionPlan, ToolExecutionStep
 
 
 class ExecutionResult(BaseModel):
     """Result of executing a tool execution plan."""
+
     task_id: str
     success: bool
     completed_steps: int
     total_steps: int
-    execution_summary: str = Field(
-        description="Summary of what was accomplished")
-    final_output: str = Field(
-        description="Final synthesized result for the user")
+    execution_summary: str = Field(description="Summary of what was accomplished")
+    final_output: str = Field(description="Final synthesized result for the user")
     step_results: List[Dict[str, Any]] = Field(default_factory=list)
     errors_encountered: List[str] = Field(default_factory=list)
     execution_time_seconds: float
@@ -40,18 +41,16 @@ class ExecutionAgent(BaseAgent):
     - Provide detailed execution reporting
     """
 
-    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger = None):
+    def __init__(self, config: AgentConfig, tool_bridge, logger: logging.Logger):
         super().__init__(config, tool_bridge, logger)
 
-        # Override agent with structured output
-        self.agent = self.agent.__class__(
+        self.agent = Agent(
             model=config.model,
             system_prompt=config.system_prompt or self.get_default_system_prompt(),
-            output_type=ExecutionResult
+            output_type=ExecutionResult,
         )
 
-        # Execution state
-        self.current_execution_plan: ToolExecutionPlan = None
+        self.current_execution_plan: Optional[ToolExecutionPlan] = None
         self.step_results: List[Dict[str, Any]] = []
         self.execution_context: Dict[str, Any] = {}
 
@@ -111,7 +110,11 @@ Result synthesis guidelines:
 
 Your output should be a comprehensive execution result with clear summaries and user-friendly final output."""
 
-    async def process_request(self, request: Union[str, Dict[str, Any]], context: Dict[str, Any] = None) -> AgentResult:
+    async def process_request(
+        self,
+        request: Union[str, Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> AgentResult:
         """
         Process an execution request for a tool execution plan.
 
@@ -129,17 +132,23 @@ Your output should be a comprehensive execution result with clear summaries and 
             if not execution_plan:
                 raise ValueError("No valid execution plan found in request")
 
-            self.logger.info(f"Executing plan for task {execution_plan.task_id} with {
-                             len(execution_plan.execution_steps)} steps")
+            self.logger.info(
+                f"Executing plan for task {execution_plan.task_id} with {
+                             len(execution_plan.execution_steps)} steps"
+            )
 
             # Execute the plan
-            execution_result = await self._execute_plan(execution_plan, context or {})
+            with logfire.span(
+                "execution_agent.execute_plan",
+                task_id=execution_plan.task_id,
+                steps_count=len(execution_plan.execution_steps),
+            ):
+                execution_result = await self._execute_plan(
+                    execution_plan, context or {}
+                )
 
-            # Extract token usage if agent was used for synthesis
             token_usage = {}
-            if hasattr(execution_result, '_synthesis_response'):
-                token_usage = self._extract_token_usage(
-                    execution_result._synthesis_response)
+            token_usage = self._extract_token_usage(execution_result.final_output)
 
             return AgentResult(
                 agent_type=AgentType.EXECUTION,
@@ -147,20 +156,23 @@ Your output should be a comprehensive execution result with clear summaries and 
                 output=execution_result,
                 execution_time_seconds=execution_result.execution_time_seconds,
                 token_usage=token_usage,
-                tool_calls=[ToolCall(
-                    tool_name=step.get("tool_name", "unknown"),
-                    parameters=step.get("parameters", {}),
-                    result=step.get("result"),
-                    error=step.get("error"),
-                    execution_time_seconds=step.get("execution_time", 0)
-                ) for step in execution_result.step_results],
+                tool_calls=[
+                    {
+                        "tool_name": step.get("tool_name", "unknown"),
+                        "parameters": step.get("parameters", {}),
+                        "result": step.get("result"),
+                        "error": step.get("error"),
+                        "execution_time_seconds": step.get("execution_time", 0),
+                    }
+                    for step in execution_result.step_results
+                ],
                 metadata={
                     "task_id": execution_plan.task_id,
                     "completed_steps": execution_result.completed_steps,
                     "total_steps": execution_result.total_steps,
                     "tool_calls_made": execution_result.tool_calls_made,
-                    "recovery_actions": execution_result.recovery_actions_taken
-                }
+                    "recovery_actions": execution_result.recovery_actions_taken,
+                },
             )
 
         except Exception as e:
@@ -171,10 +183,12 @@ Your output should be a comprehensive execution result with clear summaries and 
                 agent_type=AgentType.EXECUTION,
                 success=False,
                 error=error_msg,
-                execution_time_seconds=0
+                execution_time_seconds=0,
             )
 
-    async def _parse_execution_request(self, request: Union[str, Dict[str, Any]]) -> ToolExecutionPlan:
+    async def _parse_execution_request(
+        self, request: Union[str, Dict[str, Any]]
+    ) -> ToolExecutionPlan:
         """Parse the execution request to extract the execution plan."""
 
         if isinstance(request, dict):
@@ -184,6 +198,8 @@ Your output should be a comprehensive execution result with clear summaries and 
                     return plan_data
                 elif isinstance(plan_data, dict):
                     return ToolExecutionPlan(**plan_data)
+                else:
+                    raise ValueError(f"Invalid execution_plan type: {type(plan_data)}")
 
             elif "task" in request and "plan" in request:
                 # Task with embedded plan
@@ -191,13 +207,17 @@ Your output should be a comprehensive execution result with clear summaries and 
 
             else:
                 # Try to parse entire request as execution plan
-                return ToolExecutionPlan(**request)
+                try:
+                    return ToolExecutionPlan(**request)
+                except Exception as e:
+                    raise ValueError(f"Failed to parse request as execution plan: {e}")
 
         else:
-            raise ValueError(
-                "Request must be a dictionary containing execution plan")
+            raise ValueError("Request must be a dictionary containing execution plan")
 
-    async def _execute_plan(self, plan: ToolExecutionPlan, context: Dict[str, Any]) -> ExecutionResult:
+    async def _execute_plan(
+        self, plan: ToolExecutionPlan, context: Dict[str, Any]
+    ) -> ExecutionResult:
         """Execute a tool execution plan step by step."""
 
         start_time = time.time()
@@ -211,48 +231,39 @@ Your output should be a comprehensive execution result with clear summaries and 
         recovery_actions = []
         tool_calls_made = 0
 
-        self.logger.info(f"Starting execution of {
-                         total_steps} steps for task {plan.task_id}")
+        self.logger.info(
+            f"Starting execution of {
+                         total_steps} steps for task {plan.task_id}"
+        )
 
         try:
             # Execute steps in order
             for i, step in enumerate(plan.execution_steps):
+                with logfire.span(
+                    f"execution_agent.execute_step_{step.step_number}",
+                    tool_name=step.tool_name,
+                    step_number=step.step_number,
+                ):
+                    step_success = await self._execute_single_step(
+                        step, i, errors_encountered, recovery_actions
+                    )
 
-                # Check dependencies
-                if not await self._check_step_dependencies(step, i):
-                    error_msg = f"Step {
-                        step.step_number} dependencies not satisfied"
-                    self.logger.warning(error_msg)
-                    errors_encountered.append(error_msg)
-                    continue
-
-                # Execute step
-                step_result = await self._execute_step(step, i + 1)
-                self.step_results.append(step_result)
-                tool_calls_made += 1
-
-                if step_result["success"]:
+                if step_success:
                     completed_steps += 1
-                    self.logger.info(
-                        f"Step {step.step_number} completed successfully")
-                else:
-                    error_msg = f"Step {step.step_number} failed: {
-                        step_result.get('error', 'Unknown error')}"
-                    self.logger.error(error_msg)
-                    errors_encountered.append(error_msg)
-
-                    # Attempt recovery
-                    recovery_result = await self._attempt_recovery(step, step_result, i)
-                    if recovery_result:
-                        recovery_actions.append(recovery_result)
-                        if recovery_result.startswith("SUCCESS"):
-                            completed_steps += 1
+                tool_calls_made += 1
 
             # Calculate execution time
             execution_time = time.time() - start_time
 
             # Synthesize results
-            synthesis_result = await self._synthesize_results(plan, completed_steps, total_steps)
+            with logfire.span(
+                "execution_agent.synthesize_results",
+                completed_steps=completed_steps,
+                total_steps=total_steps,
+            ):
+                synthesis_result = await self._synthesize_results(
+                    plan, completed_steps, total_steps
+                )
 
             return ExecutionResult(
                 task_id=plan.task_id,
@@ -265,7 +276,7 @@ Your output should be a comprehensive execution result with clear summaries and 
                 errors_encountered=errors_encountered,
                 execution_time_seconds=execution_time,
                 tool_calls_made=tool_calls_made,
-                recovery_actions_taken=recovery_actions
+                recovery_actions_taken=recovery_actions,
             )
 
         except Exception as e:
@@ -286,10 +297,42 @@ Your output should be a comprehensive execution result with clear summaries and 
                 errors_encountered=errors_encountered + [error_msg],
                 execution_time_seconds=execution_time,
                 tool_calls_made=tool_calls_made,
-                recovery_actions_taken=recovery_actions
+                recovery_actions_taken=recovery_actions,
             )
 
-    async def _check_step_dependencies(self, step: ToolExecutionStep, step_index: int) -> bool:
+    async def _execute_single_step(self, step, i, errors_encountered, recovery_actions):
+        """Execute a single step with proper error handling."""
+        # Check dependencies
+        if not await self._check_step_dependencies(step, i):
+            error_msg = f"Step {step.step_number} dependencies not satisfied"
+            self.logger.warning(error_msg)
+            errors_encountered.append(error_msg)
+            return False
+
+        # Execute step
+        step_result = await self._execute_step(step, i + 1)
+        self.step_results.append(step_result)
+
+        if step_result["success"]:
+            self.logger.info(f"Step {step.step_number} completed successfully")
+            return True
+        else:
+            error_msg = f"Step {step.step_number} failed: {step_result.get('error', 'Unknown error')}"
+            self.logger.error(error_msg)
+            errors_encountered.append(error_msg)
+
+            # Attempt recovery
+            recovery_result = await self._attempt_recovery(step, step_result, i)
+            if recovery_result:
+                recovery_actions.append(recovery_result)
+                if recovery_result.startswith("SUCCESS"):
+                    return True
+
+            return False
+
+    async def _check_step_dependencies(
+        self, step: ToolExecutionStep, _step_index: int
+    ) -> bool:
         """Check if step dependencies are satisfied."""
 
         if not step.depends_on_steps:
@@ -304,55 +347,63 @@ Your output should be a comprehensive execution result with clear summaries and 
                     break
 
             if not dep_result or not dep_result.get("success"):
-                self.logger.warning(f"Step {step.step_number} dependency {
-                                    dep_step_num} not satisfied")
+                self.logger.warning(
+                    f"Step {step.step_number} dependency {
+                                    dep_step_num} not satisfied"
+                )
                 return False
 
         return True
 
-    async def _execute_step(self, step: ToolExecutionStep, step_number: int) -> Dict[str, Any]:
+    async def _execute_step(
+        self, step: ToolExecutionStep, step_number: int
+    ) -> Dict[str, Any]:
         """Execute a single tool execution step."""
 
         start_time = time.time()
 
-        self.logger.info(f"Executing step {step_number}: {
-                         step.tool_name} with params {step.parameters}")
+        self.logger.info(
+            f"Executing step {step_number}: {
+                         step.tool_name} with params {step.parameters}"
+        )
 
         try:
             # Resolve dynamic parameters from previous step results
             resolved_parameters = await self._resolve_step_parameters(step.parameters)
 
             # Execute the tool
-            tool_call = await self.mcp_bridge.execute_tool(
+            tool_result = await self.tool_bridge.execute_tool(
                 tool_name=step.tool_name,
                 parameters=resolved_parameters,
-                server_id=step.server_id
+                server_id=step.server_id,
             )
 
             execution_time = time.time() - start_time
 
-            if tool_call.error:
+            if "error" in tool_result:
                 return {
                     "step_number": step.step_number,
                     "tool_name": step.tool_name,
                     "success": False,
-                    "error": tool_call.error,
+                    "error": tool_result["error"],
                     "execution_time": execution_time,
-                    "parameters": resolved_parameters
+                    "parameters": resolved_parameters,
                 }
 
             # Store result in execution context for future steps
-            self.execution_context[f"step_{
-                step.step_number}_result"] = tool_call.result
+            self.execution_context[
+                f"step_{
+                step.step_number}_result"
+            ] = tool_result
 
             return {
                 "step_number": step.step_number,
                 "tool_name": step.tool_name,
                 "success": True,
-                "result": tool_call.result,
+                "result": tool_result,
                 "execution_time": execution_time,
                 "parameters": resolved_parameters,
-                "description": step.description
+                "description": step.description,
             }
 
         except Exception as e:
@@ -365,16 +416,22 @@ Your output should be a comprehensive execution result with clear summaries and 
                 "success": False,
                 "error": error_msg,
                 "execution_time": execution_time,
-                "parameters": step.parameters
+                "parameters": step.parameters,
             }
 
-    async def _resolve_step_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def _resolve_step_parameters(
+        self, parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Resolve dynamic parameters using results from previous steps."""
 
         resolved = {}
 
         for key, value in parameters.items():
-            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            if (
+                isinstance(value, str)
+                and value.startswith("${")
+                and value.endswith("}")
+            ):
                 # Dynamic parameter reference
                 ref = value[2:-1]  # Remove ${ and }
 
@@ -395,10 +452,7 @@ Your output should be a comprehensive execution result with clear summaries and 
         return resolved
 
     async def _attempt_recovery(
-        self,
-        step: ToolExecutionStep,
-        step_result: Dict[str, Any],
-        step_index: int
+        self, step: ToolExecutionStep, step_result: Dict[str, Any], _step_index: int
     ) -> str:
         """Attempt to recover from a failed step."""
 
@@ -410,7 +464,7 @@ Your output should be a comprehensive execution result with clear summaries and 
             # Retry the step once
             retry_result = await self._execute_step(step, step.step_number)
             if retry_result["success"]:
-                self.step_results[step_index] = retry_result
+                self.step_results[_step_index] = retry_result
                 return f"SUCCESS: Retry of step {step.step_number} succeeded"
             else:
                 return f"FAILED: Retry of step {step.step_number} failed"
@@ -427,22 +481,12 @@ Your output should be a comprehensive execution result with clear summaries and 
         return f"NO_RECOVERY: No recovery action for step {step.step_number}"
 
     async def _synthesize_results(
-        self,
-        plan: ToolExecutionPlan,
-        completed_steps: int,
-        total_steps: int
+        self, plan: ToolExecutionPlan, completed_steps: int, total_steps: int
     ) -> Dict[str, str]:
         """Synthesize execution results into user-friendly output."""
 
-        # Prepare synthesis context
-        synthesis_context = {
-            "original_task": plan.task_description,
-            "execution_approach": plan.approach,
-            "completed_steps": completed_steps,
-            "total_steps": total_steps,
-            "step_results": self.step_results,
-            "success_criteria": plan.success_criteria
-        }
+        # Note: synthesis context would be used for more complex synthesis scenarios
+        # For now, we pass the data directly to the synthesis prompt
 
         # Create synthesis prompt
         synthesis_prompt = f"""Synthesize the execution results into a clear, user-friendly response:
@@ -468,27 +512,32 @@ Focus on being helpful and actionable while translating technical details into u
             response = await self.agent.run(synthesis_prompt)
 
             # Store response for token usage extraction
-            if hasattr(response, 'output'):
+            if hasattr(response, "output"):
                 synthesis_result = response.output
                 synthesis_result._synthesis_response = response
 
                 return {
                     "summary": synthesis_result.execution_summary,
-                    "final_output": synthesis_result.final_output
+                    "final_output": synthesis_result.final_output,
                 }
             else:
                 # Fallback synthesis
-                return self._fallback_synthesis(completed_steps, total_steps, plan.task_description)
+                return self._fallback_synthesis(
+                    completed_steps, total_steps, plan.task_description
+                )
 
         except Exception as e:
             self.logger.warning(f"AI synthesis failed, using fallback: {e}")
-            return self._fallback_synthesis(completed_steps, total_steps, plan.task_description)
+            return self._fallback_synthesis(
+                completed_steps, total_steps, plan.task_description
+            )
 
-    def _fallback_synthesis(self, completed_steps: int, total_steps: int, task_description: str) -> Dict[str, str]:
+    def _fallback_synthesis(
+        self, completed_steps: int, total_steps: int, task_description: str
+    ) -> Dict[str, str]:
         """Fallback synthesis when AI synthesis fails."""
 
-        success_rate = (completed_steps / total_steps) * \
-            100 if total_steps > 0 else 0
+        success_rate = (completed_steps / total_steps) * 100 if total_steps > 0 else 0
 
         if completed_steps == total_steps:
             summary = f"Task completed successfully. All {
@@ -505,16 +554,13 @@ Focus on being helpful and actionable while translating technical details into u
             final_output = f"Failed to complete the requested task: {
                 task_description}. Please check the error details and try again."
 
-        return {
-            "summary": summary,
-            "final_output": final_output
-        }
+        return {"summary": summary, "final_output": final_output}
 
     async def execute_single_tool(
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        context: Dict[str, Any] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute a single tool directly (bypass plan execution)."""
 
