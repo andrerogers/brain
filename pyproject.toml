@@ -14,11 +14,14 @@ authors = [
 dependencies = [
     "anthropic>=0.52.2",
     "exa-py>=1.14.0",
+    "fastapi",
     "langchain-mcp-adapters>=0.1.7",
+    "logfire",
     "mcp>=1.8.0",
     "psutil>=7.0.0",
+    "pydantic-ai>=0.0.14",
     "setuptools>=80.4.0",
-    "websockets>=15.0.1",
+    "uvicorn",
 ]
 
 [tool.black]
